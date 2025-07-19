@@ -1,0 +1,4 @@
+include: 
+  - project: 'arq-devops-team/shared-libraries-gitlab-ci-cd'
+    ref: main
+    file: 'pipeline_libraries_template.yaml'

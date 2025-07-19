@@ -1,0 +1,365 @@
+use std::{
+    collections::BTreeMap,
+    fmt::{Display, Formatter},
+};
+
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    core::{
+        meta::MarketRequest,
+        traits::{HasCurrency, HasDiscountCurveId, HasForecastCurveId, Registrable},
+    },
+    currencies::enums::Currency,
+    time::date::Date,
+    utils::errors::{AtlasError, Result},
+};
+
+use super::{
+    fixedratecoupon::FixedRateCoupon,
+    floatingratecoupon::FloatingRateCoupon,
+    side::Side,
+    simplecashflow::SimpleCashflow,
+    traits::{InterestAccrual, Payable, RequiresFixingRate, Scalable},
+};
+
+/// # Cashflow
+/// Enum that represents a cashflow.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum Cashflow {
+    Redemption(SimpleCashflow),
+    Disbursement(SimpleCashflow),
+    FixedRateCoupon(FixedRateCoupon),
+    FloatingRateCoupon(FloatingRateCoupon),
+}
+
+impl Cashflow {
+    pub fn set_discount_curve_id(&mut self, id: usize) {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.set_discount_curve_id(id),
+            Cashflow::Disbursement(cashflow) => cashflow.set_discount_curve_id(id),
+            Cashflow::FixedRateCoupon(coupon) => coupon.set_discount_curve_id(id),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.set_discount_curve_id(id),
+        }
+    }
+
+    pub fn set_forecast_curve_id(&mut self, id: usize) {
+        match self {
+            Cashflow::FloatingRateCoupon(coupon) => coupon.set_forecast_curve_id(id),
+            _ => (),
+        }
+    }
+}
+
+impl From<CashflowType> for String {
+    fn from(cashflow_type: CashflowType) -> Self {
+        match cashflow_type {
+            CashflowType::Redemption => "Redemption".to_string(),
+            CashflowType::Disbursement => "Disbursement".to_string(),
+            CashflowType::FixedRateCoupon => "FixedRateCoupon".to_string(),
+            CashflowType::FloatingRateCoupon => "FloatingRateCoupon".to_string(),
+        }
+    }
+}
+
+impl Payable for Cashflow {
+    fn amount(&self) -> Result<f64> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.amount(),
+            Cashflow::Disbursement(cashflow) => cashflow.amount(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.amount(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.amount(),
+        }
+    }
+
+    fn side(&self) -> Side {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.side(),
+            Cashflow::Disbursement(cashflow) => cashflow.side(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.side(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.side(),
+        }
+    }
+
+    fn payment_date(&self) -> Date {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.payment_date(),
+            Cashflow::Disbursement(cashflow) => cashflow.payment_date(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.payment_date(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.payment_date(),
+        }
+    }
+
+    fn payment_currency(&self) -> Result<Currency> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.payment_currency(),
+            Cashflow::Disbursement(cashflow) => cashflow.payment_currency(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.payment_currency(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.payment_currency(),
+        }
+    }
+
+    fn exchange_fixing_date(&self) -> Result<Date> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.exchange_fixing_date(),
+            Cashflow::Disbursement(cashflow) => cashflow.exchange_fixing_date(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.exchange_fixing_date(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.exchange_fixing_date(),
+        }
+    }
+}
+
+impl HasCurrency for Cashflow {
+    fn currency(&self) -> Result<Currency> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.currency(),
+            Cashflow::Disbursement(cashflow) => cashflow.currency(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.currency(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.currency(),
+        }
+    }
+}
+
+impl HasDiscountCurveId for Cashflow {
+    fn discount_curve_id(&self) -> Result<usize> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.discount_curve_id(),
+            Cashflow::Disbursement(cashflow) => cashflow.discount_curve_id(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.discount_curve_id(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.discount_curve_id(),
+        }
+    }
+}
+
+impl HasForecastCurveId for Cashflow {
+    fn forecast_curve_id(&self) -> Result<usize> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.forecast_curve_id(),
+            Cashflow::Disbursement(cashflow) => cashflow.forecast_curve_id(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.forecast_curve_id(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.forecast_curve_id(),
+        }
+    }
+}
+
+impl Registrable for Cashflow {
+    fn set_id(&mut self, id: usize) {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.set_id(id),
+            Cashflow::Disbursement(cashflow) => cashflow.set_id(id),
+            Cashflow::FixedRateCoupon(coupon) => coupon.set_id(id),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.set_id(id),
+        }
+    }
+
+    fn id(&self) -> Result<usize> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.id(),
+            Cashflow::Disbursement(cashflow) => cashflow.id(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.id(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.id(),
+        }
+    }
+
+    fn market_request(&self) -> Result<MarketRequest> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.market_request(),
+            Cashflow::Disbursement(cashflow) => cashflow.market_request(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.market_request(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.market_request(),
+        }
+    }
+}
+
+impl InterestAccrual for Cashflow {
+    fn accrual_end_date(&self) -> Result<Date> {
+        match self {
+            Cashflow::FixedRateCoupon(coupon) => coupon.accrual_end_date(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.accrual_end_date(),
+            Cashflow::Disbursement(_) | Cashflow::Redemption(_) => {
+                Err(AtlasError::InvalidValueErr(
+                    "Disbursement and Redemption cashflows do not have an accrual end date"
+                        .to_string(),
+                ))
+            }
+        }
+    }
+
+    fn accrual_start_date(&self) -> Result<Date> {
+        match self {
+            Cashflow::FixedRateCoupon(coupon) => coupon.accrual_start_date(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.accrual_start_date(),
+            Cashflow::Disbursement(_) | Cashflow::Redemption(_) => {
+                Err(AtlasError::InvalidValueErr(
+                    "Disbursement and Redemption cashflows do not have an accrual start date"
+                        .to_string(),
+                ))
+            }
+        }
+    }
+
+    fn accrued_amount(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        match self {
+            Cashflow::FixedRateCoupon(coupon) => coupon.accrued_amount(start_date, end_date),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.accrued_amount(start_date, end_date),
+            _ => Ok(0.0),
+        }
+    }
+
+    fn accrued_amount_map(&self) -> Result<BTreeMap<Date, f64>> {
+        match self {
+            Cashflow::FixedRateCoupon(coupon) => coupon.accrued_amount_map(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.accrued_amount_map(),
+            _ => Ok(BTreeMap::new()),
+        }
+    }
+}
+
+impl RequiresFixingRate for Cashflow {
+    fn set_fixing_rate(&mut self, fixing_rate: f64) {
+        match self {
+            Cashflow::FloatingRateCoupon(coupon) => coupon.set_fixing_rate(fixing_rate),
+            _ => (),
+        }
+    }
+
+    fn fixing_start_date(&self) -> Result<Date> {
+        match self {
+            Cashflow::FloatingRateCoupon(coupon) => coupon.fixing_start_date(),
+            _ => Err(AtlasError::InvalidValueErr(
+                "Only FloatingRateCoupon cashflows have a fixing start date".to_string(),
+            )),
+        }
+    }
+
+    fn fixing_end_date(&self) -> Result<Date> {
+        match self {
+            Cashflow::FloatingRateCoupon(coupon) => coupon.fixing_end_date(),
+            _ => Err(AtlasError::InvalidValueErr(
+                "Only FloatingRateCoupon cashflows have a fixing end date".to_string(),
+            )),
+        }
+    }
+}
+
+impl Scalable for Cashflow {
+    fn scale(&mut self, factor: f64) -> Result<()> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.scale(factor),
+            Cashflow::Disbursement(cashflow) => cashflow.scale(factor),
+            Cashflow::FixedRateCoupon(coupon) => coupon.scale(factor),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.scale(factor),
+        }
+    }
+}
+
+use colored::*;
+impl Display for Cashflow {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let amount = self.amount().unwrap_or(0.0);
+        let currency = self.currency().map_err(|_| std::fmt::Error)?;   
+        let payment_currency = self
+            .payment_currency()
+            .map_err(|_| std::fmt::Error)?;
+        match self {
+            Cashflow::Redemption(cashflow) => write!(
+                f,
+                "{} {} {} {} {} {} {} {} {}",
+                "Pay date:".bold().yellow(),
+                cashflow.payment_date().to_string().cyan(),
+                "type:".bold().yellow(),
+                "redemp".cyan(),
+                " - ".white().bold(),
+                "amount: ".bold().yellow(),
+                format!("{:.2} {} pay in {}", amount, currency, payment_currency).cyan(),
+                "side:".bold().yellow(),
+                format!("{:?}", cashflow.side()).cyan()
+            ),
+            Cashflow::Disbursement(cashflow) => write!(
+                f,
+                "{} {} {} {} {} {} {} {} {}",
+                "Pay date:".bold().yellow(),
+                cashflow.payment_date().to_string().cyan(),
+                "type:".bold().yellow(),
+                "disb".cyan(),
+                " - ".white().bold(),
+                "amount:".bold().yellow(),
+                format!("{:.2} {} pay in {}", amount, currency, payment_currency).cyan(),
+                "side:".bold().yellow(),
+                format!("{:?}", cashflow.side()).cyan()
+            ),
+            Cashflow::FixedRateCoupon(coupon) => write!(
+                f,
+                "{} {} {} {} {} {} {} {} {} {} {} {} {}",
+                "Pay date:".bold().yellow(),
+                coupon.payment_date().to_string().cyan(),
+                "type:".bold().yellow(),
+                "fix cpn".cyan(),
+                " - ".white().bold(),
+                "amount:".bold().yellow(),
+                format!("{:.2} {} pay in {}", amount, currency, payment_currency).cyan(),
+                "side:".bold().yellow(),
+                format!("{}", coupon.side()).cyan(),
+                "rate:".bold().yellow(),
+                format!("{:.5}", coupon.rate().rate()).cyan(),
+                "accrual ".bold().yellow(),
+                format!("{} - {}", 
+                    coupon.accrual_start_date().unwrap_or(Date::new(1970, 1, 1)),
+                    coupon.accrual_end_date().unwrap_or(Date::new(1970, 1, 1))
+                ).cyan()
+            ),
+            Cashflow::FloatingRateCoupon(coupon) => write!(
+                f,
+                "{} {} {} {} {} {} {} {} {} {} {} {} {}",
+                "Pay date:".bold().yellow(),
+                coupon.payment_date().to_string().cyan(),
+                "type:".bold().yellow(),
+                "float cpn".cyan(),
+                " - ".white().bold(),
+                "amount:".bold().yellow(),
+                format!("{:.2} {} pay in {}", amount, currency, payment_currency).cyan(),
+                "side:".bold().yellow(),
+                format!("{}", coupon.side()).cyan(),
+                "fixing rate:".bold().yellow(),
+                format!("{:.5}", coupon.fixing_rate().unwrap_or(0.0)).cyan(),
+                "accrual ".bold().yellow(),
+                format!("{} - {}", 
+                    coupon.accrual_start_date().unwrap_or(Date::new(1970, 1, 1)),
+                    coupon.accrual_end_date().unwrap_or(Date::new(1970, 1, 1))
+                ).cyan()
+            ),
+        }               
+    }
+}
+
+/// # CashflowType
+/// Enum that represents the type of a cashflow.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CashflowType {
+    Redemption,
+    Disbursement,
+    FixedRateCoupon,
+    FloatingRateCoupon,
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::cashflows::side::Side;
+
+    use super::*;
+
+    #[test]
+    fn serialization_test() {
+        let cashflow = Cashflow::Redemption(SimpleCashflow::new(
+            Date::new(2024, 1, 1),
+            Currency::USD,
+            Side::Receive,
+        ));
+        let serialized = serde_json::to_string(&cashflow).unwrap();
+        println!("{}", serialized);
+
+        let deserialized: Cashflow = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(cashflow, deserialized);
+    }
+}

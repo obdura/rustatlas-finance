@@ -1,0 +1,9 @@
+{
+    "name": "@itau-one/financial-alm-analysis",
+    "version": "0.0.5",
+    "author": "Equipo Ingeniería Financiera - Comunidad Tesorería",
+    "scripts": {
+        "build": "",
+        "test": ""
+    }
+}
