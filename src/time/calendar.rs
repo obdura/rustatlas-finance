@@ -188,7 +188,7 @@ impl IsCalendar for Calendar {}
 
 
 #[cfg(test)]
-mod test {
+mod tests{
     use crate::time::{calendar::Calendar, calendars::{brazil::Brazil, chile::Chile, nullcalendar::NullCalendar, target::TARGET, traits::ImplCalendar, unitedstates::UnitedStates, weekendsonly::WeekendsOnly}};
 
     #[test]

@@ -50,26 +50,20 @@ impl<'a> NPVConstVisitor<'a> {
     pub fn set_in_local_currency(&mut self, in_local_currency: bool) {
         self.in_local_currency = in_local_currency;
     }
-}
 
-impl<'a, T: HasCashflows> ConstVisit<T> for NPVConstVisitor<'a> {
-    type Output = Result<f64>;
-    fn visit(&self, visitable: &T) -> Self::Output {
+    fn visit_cashflows(&self, visitable: &dyn HasCashflows) -> Result<f64> {
         let mut currencies = HashSet::new();
         for cf in visitable.cashflows() {
             currencies.insert(cf.payment_currency()?);
         }
 
         let mut in_local_currency = self.in_local_currency;
-        // if in_local_currency is false, we need to check if there are multiple currencies 
-        // and if so, we need to use the local currency 
         if !in_local_currency && currencies.len() > 1 {
             in_local_currency = true;
         }
 
         let npv = visitable.cashflows().try_fold(0.0, |acc, cf| {
             let id = cf.id()?;
-
             let cf_market_data =
                 self.market_data
                     .get(id)
@@ -88,7 +82,6 @@ impl<'a, T: HasCashflows> ConstVisit<T> for NPVConstVisitor<'a> {
             let flag = cf.side().sign();
             let fx = cf_market_data.fx()?;
             let fx_fwd = cf_market_data.fx_fwd()?;
-
             let amount = cf.amount()?;
 
             let npv = if in_local_currency {
@@ -99,7 +92,31 @@ impl<'a, T: HasCashflows> ConstVisit<T> for NPVConstVisitor<'a> {
 
             Ok(acc + npv)
         });
-        return npv;
+        npv
+    }
+}
+
+// Implementación genérica
+impl<'a, T: HasCashflows> ConstVisit<T> for NPVConstVisitor<'a> {
+    type Output = Result<f64>;
+    fn visit(&self, visitable: &T) -> Self::Output {
+        self.visit_cashflows(visitable)
+    }
+}
+
+// Implementación para trait object
+impl<'a> ConstVisit<&mut Box<dyn HasCashflows>>  for NPVConstVisitor<'a> {
+    type Output = Result<f64>;
+    fn visit(&self, visitable: &&mut Box<dyn HasCashflows>) -> Self::Output {
+        self.visit_cashflows(visitable.as_ref())
+    }
+}
+
+// Implementación para trait object
+impl<'a> ConstVisit<& Box<dyn HasCashflows>>  for NPVConstVisitor<'a> {
+    type Output = Result<f64>;
+    fn visit(&self, visitable: && Box<dyn HasCashflows>) -> Self::Output {
+        self.visit_cashflows(visitable.as_ref())
     }
 }
 

@@ -123,7 +123,7 @@ impl<'a> Model for SimpleModel<'a> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests{
     use std::sync::{Arc, RwLock};
 
     use crate::{

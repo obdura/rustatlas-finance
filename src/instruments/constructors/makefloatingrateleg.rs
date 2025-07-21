@@ -317,14 +317,28 @@ impl MakeFloatingRateLeg {
                 let notionals =
                     notionals_vector(fixings_dates.len() - 1, notional, Structure::Bullet);
 
-                add_cashflows_to_vec(
-                    &mut cashflows,
-                    &first_date,
-                    &vec![notional],
-                    side.inverse(),
-                    currency,
-                    CashflowType::Disbursement,
-                );
+
+                if self.initial_flow {
+                    add_cashflows_to_vec(
+                        &mut cashflows,
+                        &first_date,
+                        &vec![notional],
+                        side.inverse(),
+                        currency,
+                        CashflowType::Disbursement,
+                    );
+                }
+
+                if self.final_flow {
+                    add_cashflows_to_vec(
+                        &mut cashflows,
+                        &last_date,
+                        &vec![notional],
+                        side,
+                        currency,
+                        CashflowType::Redemption,
+                    );
+                }
 
                 build_coupons_from_notionals(
                     &mut cashflows,
@@ -338,14 +352,6 @@ impl MakeFloatingRateLeg {
                     currency,
                 );
 
-                add_cashflows_to_vec(
-                    &mut cashflows,
-                    &last_date,
-                    &vec![notional],
-                    side,
-                    currency,
-                    CashflowType::Redemption,
-                );
 
                 match self.discount_curve_id {
                     Some(id) => cashflows.iter_mut().for_each(|cf| {
@@ -418,7 +424,7 @@ fn build_coupons_from_notionals(
 }
 
 #[cfg(test)]
-mod test {
+mod tests{
     use crate::{
         cashflows::{
             cashflow::Cashflow,

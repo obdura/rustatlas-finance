@@ -218,7 +218,7 @@ mod tests {
             cf.set_fixing_rate(0.05);
         });
 
-        assert!(vanillairsswap.cashflows_as_vec().len() == 15);
+        assert!(vanillairsswap.cashflows_as_vec().len() == 14);
 
         Ok(())
     }

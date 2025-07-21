@@ -123,7 +123,7 @@ impl AdvanceTermStructureInTime for CompositeTermStructure {
 impl YieldTermStructureTrait for CompositeTermStructure {}
 
 #[cfg(test)]
-mod test {
+mod tests{
     use std::sync::Arc;
 
     use crate::{

@@ -776,7 +776,7 @@ fn calculate_equal_payment_redemptions(
 }
 
 #[cfg(test)]
-mod test {
+mod tests{
     use crate::{
         cashflows::{cashflow::Cashflow, side::Side, traits::RequiresFixingRate},
         currencies::enums::Currency,

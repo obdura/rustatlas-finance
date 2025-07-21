@@ -28,11 +28,8 @@ impl IndexingVisitor {
     pub fn request(&self) -> Vec<MarketRequest> {
         self.request.borrow().clone()
     }
-}
 
-impl<T: HasCashflows> Visit<T> for IndexingVisitor {
-    type Output = Result<()>;
-    fn visit(&self, has_cashflows: &mut T) -> Self::Output {
+    fn visit_cashflows(&self, has_cashflows: &mut dyn HasCashflows) -> Result<()> {
         let mut requests = self.request.borrow_mut();
         has_cashflows
             .mut_cashflows()
@@ -45,3 +42,20 @@ impl<T: HasCashflows> Visit<T> for IndexingVisitor {
         Ok(())
     }
 }
+
+impl<T: HasCashflows> Visit<T> for IndexingVisitor {
+    type Output = Result<()>;
+    fn visit(&self, has_cashflows: &mut T) -> Self::Output {
+        self.visit_cashflows(has_cashflows)
+    }
+}
+
+impl Visit<&mut Box<dyn HasCashflows>> for IndexingVisitor {
+    type Output = Result<()>;
+    fn visit(&self, has_cashflows: &mut &mut Box<dyn HasCashflows>) -> Self::Output {
+        self.visit_cashflows(has_cashflows.as_mut())
+    }
+}
+
+
+

@@ -37,7 +37,7 @@ impl DayCountProvider for Business252 {
 }
 
 #[cfg(test)]
-mod test {
+mod tests{
     use crate::time::daycounters::traits::DayCountProvider;
 
     #[test]

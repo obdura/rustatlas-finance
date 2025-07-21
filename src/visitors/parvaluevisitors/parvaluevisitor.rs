@@ -232,7 +232,7 @@ impl<'a> ConstVisit<CrossCurrencySwap> for ParValueConstVisitor<'a> {
     }
 }
 #[cfg(test)]
-mod test {
+mod tests{
     use std::{
         collections::HashMap,
         sync::{Arc, RwLock},

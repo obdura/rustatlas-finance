@@ -363,8 +363,7 @@ impl MakeFixedRateLeg {
 
                 if self.final_flow {
                     add_cashflows_to_vec(
-                        &mut cashflows,
-                        &last_date,
+                        &mut cashflows,                      &last_date,
                         &vec![notional],
                         side,
                         currency,
@@ -447,13 +446,13 @@ fn build_coupons_from_notionals(
 }
 
 #[cfg(test)]
-mod test {
+mod tests{
 
     use super::MakeFixedRateLeg;
     use crate::{
         cashflows::{side::Side, traits::Payable},
         currencies::enums::Currency,
-        rates::{enums::Compounding, interestrate::InterestRate},
+        rates::{enums::Compounding, interestrate::{InterestRate, RateDefinition}},
         time::{
             calendar::Calendar,
             calendars::chile::Chile,
@@ -542,4 +541,94 @@ mod test {
         }
 
     }
+
+    #[test]
+    fn test_make_fixed_rate_leg_with_initial_flow() {
+        let start_date = Date::new(2020, 1, 1);
+        let end_date = start_date + Period::new(1, TimeUnit::Years);
+        let rate_definition = RateDefinition::new(
+            DayCounter::Thirty360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let rate = InterestRate::from_rate_definition(0.5, rate_definition);
+        let notional = 1_000_000.0;
+
+        let fix_leg = MakeFixedRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_notional(notional)
+            .with_rate(rate)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(0))
+            .with_payment_frequency(Frequency::Annual)
+            .bullet()
+            .build()
+            .unwrap();
+
+        assert!(fix_leg.cashflows_as_vec().len() == 2);
+
+        let fix_leg = MakeFixedRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_notional(notional)
+            .with_rate(rate)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(0))
+            .with_payment_frequency(Frequency::Annual)
+            .with_initial_flow(true)
+            .bullet()
+            .build()
+            .unwrap();
+
+        assert!(fix_leg.cashflows_as_vec().len() == 3);
+    }
+
+    #[test]
+    fn test_make_fixed_rate_leg_with_final_flow() {
+        let start_date = Date::new(2020, 1, 1);
+        let end_date = start_date + Period::new(1, TimeUnit::Years);
+        let rate_definition = RateDefinition::new(
+            DayCounter::Thirty360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let rate = InterestRate::from_rate_definition(0.5, rate_definition);
+        let notional = 1_000_000.0;
+
+        let fix_leg = MakeFixedRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_notional(notional)
+            .with_rate(rate)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(0))
+            .with_payment_frequency(Frequency::Annual)
+            .bullet()
+            .with_final_flow(false)
+            .build()
+            .unwrap();
+
+        assert!(fix_leg.cashflows_as_vec().len() == 1);
+
+        let fix_leg = MakeFixedRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_notional(notional)
+            .with_rate(rate)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(0))
+            .with_payment_frequency(Frequency::Annual)
+            .with_final_flow(false)
+            .with_initial_flow(true)
+            .bullet()
+            .build()
+            .unwrap();
+
+        assert!(fix_leg.cashflows_as_vec().len() == 2);
+    }   
 }

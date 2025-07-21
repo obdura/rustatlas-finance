@@ -245,7 +245,7 @@ impl Display for FloatingRateInstrument {
     }
 }
 #[cfg(test)]
-mod test {
+mod tests{
     use crate::{
         cashflows::{
             cashflow::Cashflow,
