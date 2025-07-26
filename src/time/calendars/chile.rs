@@ -149,7 +149,7 @@ impl Chile {
         day == 31 && month == 12
     }
 
-    pub fn is_business_day(&self, date: NaiveDate) -> bool {
+    pub fn is_standard_business_day(&self, date: NaiveDate) -> bool {
         let weekday = date.weekday();
         let day = date.day();
         let month = date.month();
@@ -188,7 +188,7 @@ impl Chile {
 
 impl ImplCalendar for Chile {
     fn impl_is_business_day(&self, date: &Date) -> bool {
-        self.is_business_day(date.base_date())
+        self.is_standard_business_day(date.base_date())
     }
 
     fn impl_name(&self) -> String {
@@ -234,7 +234,7 @@ impl ImplCalendar for Chile {
         let mut business_days = vec![];
         let mut d = from;
         while d <= to {
-            if self.is_business_day(d.base_date()) {
+            if self.is_business_day(&d) {
                 business_days.push(d);
             }
             d = d + 1;
@@ -259,6 +259,22 @@ mod tests {
     use crate::time::{date::Date, enums::{BusinessDayConvention, TimeUnit}, period::Period};
 
     #[test]
+    fn test_chile_settlement_add_holiday() {
+        let mut cal = Chile::new(ChileMarket::SSE);
+        assert_eq!(cal.is_business_day(&Date::new(2028, 2, 2)), true);
+        cal.add_holiday(Date::new(2028, 2, 2));
+        assert_eq!(cal.is_business_day(&Date::new(2028, 2, 2)), false);
+    }
+
+    #[test] 
+    fn test_chile_settlement_remove_holiday() {
+        let mut cal = Chile::new(ChileMarket::SSE);
+        assert_eq!(cal.is_business_day(&Date::new(2028, 12, 25)), false);
+        cal.remove_holiday(Date::new(2028, 12, 25));
+        assert_eq!(cal.is_business_day(&Date::new(2028, 12, 25)), true);
+    }
+
+    #[test]
     fn test_chile_settlement() {
         let cal = Chile::new(ChileMarket::SSE);
         let expected_hol = vec![
@@ -266,7 +282,7 @@ mod tests {
             Date::new(2024, 3, 29),
             Date::new(2024, 5, 1),
             Date::new(2024, 5, 21),
-            Date::new(2024, 6, 21),
+            Date::new(2024, 6, 20),
             Date::new(2024, 7, 16),
             Date::new(2024, 8, 15),
             Date::new(2024, 9, 18),
@@ -277,7 +293,7 @@ mod tests {
             Date::new(2024, 12, 31),
         ];
         for d in expected_hol {
-            assert_eq!(cal.is_business_day(d.base_date()), false);
+            assert_eq!(cal.is_business_day(&d), false);
         }
             
     }
@@ -527,7 +543,7 @@ mod tests {
         ];
         for d in expected_hol {
             println!("{:?}", d);
-            assert_eq!(cal.is_business_day(d.base_date()), false);
+            assert_eq!(cal.is_business_day(&d), false);
         }
             
     }

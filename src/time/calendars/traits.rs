@@ -250,9 +250,8 @@ mod tests {
     use crate::time::calendars::{chile::{Chile, ChileMarket}, unitedstates::{UnitedStates, UnitedStatesMarket}};
     
     #[test]
-    fn test_adjust_modified_following_same_month() {
+    fn test_adjust_modified_following_same_month_usa() {
         let calendar = UnitedStates::new(UnitedStatesMarket::Settlement);
-        
         // Friday -> Monday (normal case)
         let friday = Date::new(2024, 1, 5); // Friday
         let adjusted = calendar.adjust(friday, Some(BusinessDayConvention::ModifiedFollowing));
@@ -260,9 +259,26 @@ mod tests {
     }
 
     #[test]
-    fn test_adjust_modified_following_cross_month() {
+    fn test_adjust_modified_following_same_month_chile() {
+        let calendar = Chile::new(ChileMarket::SSE);
+        // Friday -> Monday (normal case)
+        let friday = Date::new(2024, 1, 5); // Friday
+        let adjusted = calendar.adjust(friday, Some(BusinessDayConvention::ModifiedFollowing));
+        assert_eq!(adjusted, Date::new(2024, 1, 5)); // Friday
+    }
+
+    #[test]
+    fn test_adjust_modified_following_cross_month_usa() {
         let calendar = UnitedStates::new(UnitedStatesMarket::Settlement);
-        
+        // Last day of month on Saturday -> should go to preceding business day
+        let saturday = Date::new(2024, 6, 30); // Sunday (June 30, 2024)
+        let adjusted = calendar.adjust(saturday, Some(BusinessDayConvention::ModifiedFollowing));
+        assert_eq!(adjusted, Date::new(2024, 6, 28)); // Friday (preceding)
+    }
+
+    #[test] 
+    fn test_adjust_modified_following_cross_month_chile() {
+        let calendar = Chile::new(ChileMarket::SSE);
         // Last day of month on Saturday -> should go to preceding business day
         let saturday = Date::new(2024, 6, 30); // Sunday (June 30, 2024)
         let adjusted = calendar.adjust(saturday, Some(BusinessDayConvention::ModifiedFollowing));
@@ -270,7 +286,16 @@ mod tests {
     }
 
     #[test]
-    fn test_adjust_modified_leap() {
+     fn test_adjust_modified_leap_usa() {
+        let calendar = UnitedStates::new(UnitedStatesMarket::Settlement);
+        // Last day of month on Saturday -> should go to preceding business day
+        let leap = Date::new(2024, 2, 29);
+        let adjusted = calendar.adjust(leap, Some(BusinessDayConvention::ModifiedFollowing));
+        assert_eq!(adjusted, Date::new(2024, 2, 29));
+    }
+
+    #[test]
+    fn test_adjust_modified_leap_chile() {
         let calendar = Chile::new(ChileMarket::SSE);
         
         // Last day of month on Saturday -> should go to preceding business day
@@ -280,9 +305,18 @@ mod tests {
     }
 
     #[test]
-    fn test_adjust_modified_following_business_day() {
+    fn test_adjust_modified_following_business_day_usa() {
         let calendar = UnitedStates::new(UnitedStatesMarket::Settlement);
         
+        // Already a business day -> no adjustment
+        let tuesday = Date::new(2024, 1, 2); // Tuesday
+        let adjusted = calendar.adjust(tuesday, Some(BusinessDayConvention::ModifiedFollowing));
+        assert_eq!(adjusted, tuesday);
+    }
+
+    #[test] 
+    fn test_adjust_modified_following_business_day_chile() {
+        let calendar = Chile::new(ChileMarket::SSE);
         // Already a business day -> no adjustment
         let tuesday = Date::new(2024, 1, 2); // Tuesday
         let adjusted = calendar.adjust(tuesday, Some(BusinessDayConvention::ModifiedFollowing));
@@ -300,12 +334,43 @@ mod tests {
     }
 
     #[test]
-    fn test_adjust_modified_following_month_end_weekend() {
+    fn test_adjust_modified_following_month_end_weekend_usa() {
         let calendar = UnitedStates::new(UnitedStatesMarket::Settlement);
         
         // Month end on Sunday -> should go to preceding Friday
         let sunday = Date::new(2024, 3, 31); // Sunday
         let adjusted = calendar.adjust(sunday, Some(BusinessDayConvention::ModifiedFollowing));
         assert_eq!(adjusted, Date::new(2024, 3, 29)); // Friday (preceding)
+    }
+
+    #[test]
+    fn test_adjust_modified_following_month_end_weekend_chile() {
+        let calendar = Chile::new(ChileMarket::SSE);
+        
+        // Month end on Sunday -> should go to preceding Friday
+        let sunday = Date::new(2024, 3, 31); // Sunday
+        let adjusted = calendar.adjust(sunday, Some(BusinessDayConvention::ModifiedFollowing));
+        assert_eq!(adjusted, Date::new(2024, 3, 28)); // Friday (preceding)
+    }
+
+    #[test]
+    fn test_adjust_modified_following_month_end_weekend_chile_2() {
+        let calendar = Chile::new(ChileMarket::SSE);
+        
+        // Month end on Sunday -> should go to preceding Friday
+        let sunday = Date::new(2025, 7, 27); // Sunday
+        let adjusted = calendar.adjust(sunday, Some(BusinessDayConvention::ModifiedFollowing));
+        assert_eq!(adjusted, Date::new(2025, 7, 28)); // Friday (preceding)
+    }
+
+    
+    #[test]
+    fn test_adjust_modified_following_month_end_weekend_chile_3() {
+        let calendar = Chile::new(ChileMarket::SSE);
+        
+        // Month end on Sunday -> should go to preceding Friday
+        let sunday = Date::new(2025, 8, 31); // Sunday
+        let adjusted = calendar.adjust(sunday, Some(BusinessDayConvention::ModifiedFollowing));
+        assert_eq!(adjusted, Date::new(2025, 8, 29)); // Friday (preceding)
     }
 }

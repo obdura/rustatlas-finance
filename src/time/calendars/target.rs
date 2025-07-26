@@ -121,6 +121,22 @@ mod tests {
     }
 
     #[test]
+    fn test_target_settlement_remove_holiday() {
+        let mut cal = TARGET::new();
+        assert_eq!(cal.is_business_day(&Date::new(2021, 1, 1)), false);
+        cal.remove_holiday(Date::new(2021, 1, 1));
+        assert_eq!(cal.is_business_day(&Date::new(2021, 1, 1)), true);
+    }
+
+    #[test]
+    fn test_target_settlement_add_holiday() {
+        let mut cal = TARGET::new();
+        assert_eq!(cal.is_business_day(&Date::new(2025, 7, 25)), true);
+        cal.add_holiday(Date::new(2025, 7, 25));
+        assert_eq!(cal.is_business_day(&Date::new(2025, 7, 25)), false);
+    }
+
+    #[test]
     fn test_advance_date() {
         let date = Date::new(2013, 3, 28);
         let cal = TARGET::new();
@@ -130,8 +146,8 @@ mod tests {
             Some(BusinessDayConvention::Unadjusted),
             true,
         );
-        let tmpd = date+1;
-        assert!(cal.is_business_day(&tmpd)==false);
+        let tmpd = date + 1;
+        assert!(cal.is_business_day(&tmpd) == false);
         assert_eq!(cal.adjust(tmpd, None).month(), 4);
 
         assert_eq!(new_date, Date::new(2014, 3, 31));

@@ -112,7 +112,7 @@ impl Brazil {
         
     }
 
-    pub fn is_business_day(&self, date: NaiveDate) -> bool {
+    pub fn is_standard_business_day(&self, date: NaiveDate) -> bool {
         let weekday = date.weekday();
         let day = date.day();
         let month = date.month();
@@ -169,7 +169,7 @@ impl Brazil {
 
 impl ImplCalendar for Brazil {
     fn impl_is_business_day(&self, date: &Date) -> bool {
-        self.is_business_day(date.base_date())
+        self.is_standard_business_day(date.base_date())
     }
 
     fn impl_name(&self) -> String {
@@ -196,7 +196,7 @@ impl ImplCalendar for Brazil {
         let mut holidays = vec![];
         let mut d = from;
         while d <= to {
-            if self.is_business_day(d.base_date()) {
+            if self.is_business_day(&d) {
                 holidays.push(d);
             }
             d = d + 1;
@@ -215,7 +215,7 @@ impl ImplCalendar for Brazil {
         let mut business_days = vec![];
         let mut d = from;
         while d <= to {
-            if self.is_business_day(d.base_date()) {
+            if self.is_business_day(&d) {
                 business_days.push(d);
             }
             d = d + 1;
@@ -237,6 +237,22 @@ impl Default for Brazil {
 mod tests {
     use super::*;
     use crate::time::date::Date;
+
+    #[test] 
+    fn test_brazil_settlement_add_holiday() {
+        let mut cal = Brazil::new(BrazilMarket::Settlement);
+        assert_eq!(cal.is_business_day(&Date::new(2028, 2, 2)), true);
+        cal.add_holiday(Date::new(2028, 2, 2));
+        assert_eq!(cal.is_business_day(&Date::new(2028, 2, 2)), false);
+    }
+
+    #[test]
+    fn test_brazil_settlement_remove_holiday() {
+        let mut cal = Brazil::new(BrazilMarket::Settlement);
+        assert_eq!(cal.is_business_day(&Date::new(2028, 12, 25)), false);
+        cal.remove_holiday(Date::new(2028, 12, 25));
+        assert_eq!(cal.is_business_day(&Date::new(2028, 12, 25)), true);
+    }
 
     #[test]
     fn test_brazil_settlement() {
@@ -264,7 +280,7 @@ mod tests {
         ];
 
         for d in expected_hol {
-            assert_eq!(cal.is_business_day(d.base_date()), false);
+            assert_eq!(cal.is_business_day(&d), false);
         }
     }
 }

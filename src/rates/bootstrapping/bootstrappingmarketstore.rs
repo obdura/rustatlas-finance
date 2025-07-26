@@ -204,7 +204,7 @@ impl BootstrappingMarketStore {
 /// * `dates` - The dates of the curve
 /// * `year_fractions` - The year fractions corresponding to the dates
 /// * `discount_factors` - The discount factors corresponding to the dates
-/// * `discount_factor_index` - The index of the discount factors for each date
+/// * `related_instrument_index` - The index of the discount factors for each date
 /// * `day_counter` - The day counter used for calculating year fractions
 /// * `interpolator` - The interpolator used for calculating discount factors
 /// * `enable_extrapolation` - Whether to enable extrapolation for the interpolator
@@ -215,7 +215,7 @@ pub struct BootstrappingCurve {
     dates: Vec<Date>,
     year_fractions: Vec<f64>,
     discount_factors: Vec<f64>,
-    discount_factor_index: Vec<Option<usize>>,
+    related_instrument_index: Vec<Option<usize>>,
     day_counter: DayCounter,
     interpolator: Interpolator,
     enable_extrapolation: bool,
@@ -230,7 +230,7 @@ impl BootstrappingCurve {
             dates: vec![reference_date],
             year_fractions: vec![0.0], // Start with 0.0 for the reference date
             discount_factors: vec![1.0], // Start with 1.0 for the reference date
-            discount_factor_index: vec![None], // Index for the reference date
+            related_instrument_index: vec![None], // Index for the reference date
             day_counter: DayCounter::Actual360, // Default day counter
             interpolator: Interpolator::LogLinear, // Default interpolator
             enable_extrapolation: true, // Default to true
@@ -261,8 +261,8 @@ impl BootstrappingCurve {
         &mut self.discount_factors
     }
 
-    pub fn discount_factor_index(&self) -> &Vec<Option<usize>> {
-        &self.discount_factor_index
+    pub fn related_instrument_index(&self) -> &Vec<Option<usize>> {
+        &self.related_instrument_index
     }
 
     pub fn day_counter(&self) -> &DayCounter {
@@ -289,7 +289,7 @@ impl BootstrappingCurve {
         self.enable_extrapolation = enable;
     }
 
-    pub fn add_date(&mut self, date: Date, discount_factor_index: usize) -> Result<()> {
+    pub fn add_date(&mut self, date: Date, related_instrument_index: usize) -> Result<()> {
         if date < self.reference_date {
             return Err(AtlasError::BootstrappingErr(
                 "Date in bootstrapping curve must be after the reference date".to_string(),
@@ -309,8 +309,8 @@ impl BootstrappingCurve {
                 self.dates.insert(pos, date);
                 self.discount_factors.insert(pos, 1.0); // Initialize with a default value 1.0
                 self.year_fractions.insert(pos, year_fraction);
-                self.discount_factor_index
-                    .insert(pos, Some(discount_factor_index));
+                self.related_instrument_index
+                    .insert(pos, Some(related_instrument_index));
             }
         }
         Ok(())
@@ -513,7 +513,7 @@ mod tests {
         assert_eq!(curve.dates, vec![ref_date, date1, date3, date2]);
         assert_eq!(curve.discount_factors, vec![1.0, 1.0, 1.0, 1.0]);
         assert_eq!(
-            curve.discount_factor_index,
+            curve.related_instrument_index,
             vec![None, Some(0), Some(2), Some(1)]
         );
 

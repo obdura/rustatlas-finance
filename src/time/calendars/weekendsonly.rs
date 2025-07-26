@@ -45,12 +45,35 @@ impl ImplCalendar for WeekendsOnly {
         self.removed_holidays.insert(date);
     }
 
-    fn holiday_list(&self, _from: Date, _to: Date, _include_weekends: bool) -> Vec<Date> {
-        vec![]
+    fn holiday_list(&self, from: Date, to: Date, include_weekends: bool) -> Vec<Date> {
+        let mut holidays = vec![];
+        let mut d = from;
+        while d <= to {
+            if self.is_holiday(&d) {
+                holidays.push(d);
+            }
+            d = d + 1;
+        }
+        if include_weekends {
+            holidays
+        } else {
+            holidays
+                .into_iter()
+                .filter(|d| !self.is_weekend(&d.weekday()))
+                .collect()
+        }
     }
 
-    fn business_day_list(&self, _from: Date, _to: Date) -> Vec<Date> {
-        vec![]
+    fn business_day_list(&self, from: Date, to: Date) -> Vec<Date> {
+        let mut business_days = vec![];
+        let mut d = from;
+        while d <= to {
+            if self.is_business_day(&d) {
+                business_days.push(d);
+            }
+            d = d + 1;
+        }
+        business_days
     }
 }
 
@@ -61,9 +84,25 @@ mod tests {
     use std::collections::HashSet;
 
     use crate::time::{
-        calendars::{traits::IsCalendar, weekendsonly::WeekendsOnly},
+        calendars::{traits::{ImplCalendar, IsCalendar}, weekendsonly::WeekendsOnly},
         date::Date,
     };
+
+    #[test]
+    fn test_weekends_only_add_holiday() {
+        let mut cal = WeekendsOnly::new();
+        assert_eq!(cal.is_business_day(&Date::new(2025, 7, 25)), true);
+        cal.add_holiday(Date::new(2025, 7, 25));
+        assert_eq!(cal.is_business_day(&Date::new(2025, 7, 25)), false);
+    }
+
+    #[test]
+    fn test_weekends_only_remove_holiday() {
+        let mut cal = WeekendsOnly::new();
+        assert_eq!(cal.is_business_day(&Date::new(2025, 7, 26)), false);
+        cal.add_holiday(Date::new(2025, 7,26));
+        assert_eq!(cal.is_business_day(&Date::new(2025, 7, 26)), false);
+    }
 
     #[test]
     fn test_weekendsonly() {

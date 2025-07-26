@@ -1,11 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    currencies::enums::Currency,
-    rates::bootstrapping::bootstrappingmarketstore::BootstrappingMarketStore,
-    time::date::Date,
-    utils::errors::{AtlasError, Result},
-    visitors::traits::HasCashflows,
+    currencies::enums::Currency, prelude::HasReferenceDate, rates::bootstrapping::bootstrappingmarketstore::BootstrappingMarketStore, time::date::Date, utils::errors::{AtlasError, Result}, visitors::traits::HasCashflows
 };
 
 /// # BootstrappingEngine
@@ -22,6 +18,7 @@ pub struct BootstrappingEngine {
     market_store: BootstrappingMarketStore,
     instruments: Vec<Box<dyn HasCashflows>>,
     number_of_instruments: usize,
+    optimization_order: Vec<(usize, usize)>
 }
 
 impl BootstrappingEngine {
@@ -31,6 +28,7 @@ impl BootstrappingEngine {
             market_store: BootstrappingMarketStore::new(reference_date, local_currency),
             instruments: Vec::new(),
             number_of_instruments: 0,
+            optimization_order: Vec::new(),
         }
     }
 
@@ -48,6 +46,26 @@ impl BootstrappingEngine {
 
     pub fn number_of_instruments(&self) -> usize {
         self.number_of_instruments
+    }
+
+    pub fn instruments(&self) -> &Vec<Box<dyn HasCashflows>> {
+        &self.instruments
+    }
+
+    pub fn instruments_mut(&mut self) -> &mut Vec<Box<dyn HasCashflows>> {
+        &mut self.instruments
+    }
+
+    pub fn optimization_order(&self) -> &Vec<(usize, usize)> {
+        &self.optimization_order
+    }
+
+    pub fn optimization_order_len(&self) -> usize {
+        self.optimization_order.len()
+    }
+
+    pub fn set_optimization_order(&mut self, order: Vec<(usize, usize)>) {
+        self.optimization_order = order;
     }
 
     pub fn add_instrument(
@@ -70,35 +88,60 @@ impl BootstrappingEngine {
         Ok(())
     }
 
-    pub fn update_discount_factors(&mut self, new_discount_factors: Vec<f64>) -> Result<()> {
-        if new_discount_factors.len() != self.number_of_instruments() {
+    pub fn update_discount_factors(&mut self, new_discount_factors: &Vec<f64>) -> Result<()> {
+        if new_discount_factors.len() != self.optimization_order.len() {	
             return Err(AtlasError::BootstrappingErr(format!(
-                "Number of new discount factors ({}) does not match number of instruments ({})",
+                "Number of new discount factors ({}) does not match the number indexes ({})",
                 new_discount_factors.len(),
                 self.number_of_instruments()
             )));
         }
 
         let curves_map = self.market_store.curves_map_mut();
-        for (_, curve) in curves_map.iter_mut() {
-            let index = curve.discount_factor_index().clone();
-            let discount_factors = curve.discount_factors_mut();
-            for (df, idx) in discount_factors.iter_mut().zip(index.iter()) {
-                if let Some(id) = idx {
-                    *df = new_discount_factors[id.clone()];
+        for ((curve_id, element_id), new_df) in self.optimization_order.iter().zip(new_discount_factors.iter()) {
+            if let Some(curve) = curves_map.get_mut(curve_id) {
+                let discount_factors = curve.discount_factors_mut();
+                if let Some(df) = discount_factors.get_mut(*element_id) {
+                    *df = *new_df;
+                } else {
+                    return Err(AtlasError::BootstrappingErr(format!(
+                        "Index {} out of bounds for curve {}",
+                        element_id, curve_id
+                    )));
                 }
+            } else {
+                return Err(AtlasError::BootstrappingErr(format!(
+                    "Curve with id {} not found",
+                    curve_id
+                )));
             }
         }
         Ok(())
     }
 
-    pub fn instruments(&self) -> &Vec<Box<dyn HasCashflows>> {
-        &self.instruments
+
+    pub fn relevant_instruments(&self) -> Vec<usize> {
+        let mut relevant_instruments = Vec::new();
+        for (curve_id, element_id) in self.optimization_order.iter() {
+            if let Some(curve) = self.market_store.curves_map().get(curve_id) {
+                let id = curve.related_instrument_index().get(*element_id).unwrap().unwrap();
+                relevant_instruments.push(id);
+            }
+        }
+        relevant_instruments
     }
 
-    pub fn instruments_mut(&mut self) -> &mut Vec<Box<dyn HasCashflows>> {
-        &mut self.instruments
+    pub fn relevant_discount_factors(&self) -> Vec<f64> {
+        let mut relevant_discount_factors = Vec::new();
+        for (curve_id, element_id) in self.optimization_order.iter() {
+            if let Some(curve) = self.market_store.curves_map().get(curve_id) {
+                let id = curve.discount_factors().get(*element_id).unwrap().clone();
+                relevant_discount_factors.push(id);
+            }
+        }
+        relevant_discount_factors
     }
+
 }
 
 
@@ -129,9 +172,11 @@ impl Display for BootstrappingEngine {
                 .for_each(|(date, df)| {
                     writeln!(
                         f,
-                        "{} {}, {} {}",
+                        "{} {}, {} {}, {} {}",
                         "    Date:".magenta(),
                         date,
+                        "tenor:".magenta(),
+                        curve.day_counter().day_count(curve.reference_date(), *date),
                         "Discount Factor:".magenta(),
                         df
                     ).unwrap();
@@ -291,6 +336,8 @@ mod tests {
 
         engine.add_instrument(1, end_date, Box::new(inst))?;
 
+        engine.set_optimization_order(vec![(1,1)]);
+
         let indexer = IndexingVisitor::new();
         engine
             .instruments_mut()
@@ -300,7 +347,7 @@ mod tests {
                 Ok(())
             })?;
 
-        engine.update_discount_factors(vec![0.5])?;
+        engine.update_discount_factors(&vec![0.5])?;
         let model = BootstrappingModel::new(engine.market_store());
 
         let data = model.gen_market_data(&indexer.request()).unwrap();
@@ -429,6 +476,7 @@ mod tests {
             .build()?;
 
         engine.add_instrument(3, end_date, Box::new(inst2))?;
+        engine.set_optimization_order(vec![(1,1), (3,1)]);
 
         let indexer = IndexingVisitor::new();
         engine
@@ -439,7 +487,9 @@ mod tests {
                 Ok(())
             })?;
 
-        engine.update_discount_factors(vec![0.5, 0.25])?;
+            
+
+        engine.update_discount_factors(&vec![0.5, 0.25])?;
         let model = BootstrappingModel::new(engine.market_store());
 
         let data = model.gen_market_data(&indexer.request()).unwrap();

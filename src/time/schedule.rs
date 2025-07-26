@@ -205,7 +205,10 @@ impl MakeSchedule {
     }
 
     /// Sets the termination date convention.
-    pub fn with_termination_date_convention(mut self,termination_date_convention: BusinessDayConvention) -> MakeSchedule {
+    pub fn with_termination_date_convention(
+        mut self,
+        termination_date_convention: BusinessDayConvention,
+    ) -> MakeSchedule {
         self.termination_date_convention = termination_date_convention;
         return self;
     }
@@ -626,7 +629,6 @@ impl MakeSchedule {
     }
 }
 
-
 // Auxiliary functions
 fn next_twentieth(date: Date, rule: DateGenerationRule) -> Date {
     let mut result = Date::new(date.year(), date.month(), 20);
@@ -670,7 +672,10 @@ fn previous_twentieth(date: Date, rule: DateGenerationRule) -> Date {
 mod tests {
     use std::vec;
 
-    use crate::time::calendars::target::TARGET;
+    use crate::{
+        prelude::{UnitedStates, UnitedStatesMarket},
+        time::calendars::target::TARGET,
+    };
 
     use super::*;
 
@@ -1039,8 +1044,104 @@ mod tests {
             .with_first_date(first_date)
             .build()
             .unwrap();
-        let dates = schedule.dates();   
+        let dates = schedule.dates();
         assert_eq!(dates[0], from);
-        assert_eq!(dates[1], first_date);        
+        assert_eq!(dates[1], first_date);
+    }
+
+    #[test]
+    fn test_make_schedule_sofr_calendar_10years_1() {
+        let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
+        let from = Date::new(2025, 7, 28);
+        let to = from + Period::new(10, TimeUnit::Years);
+        let schedule = MakeSchedule::new(from, to)
+            .with_frequency(Frequency::Annual)
+            .with_convention(BusinessDayConvention::ModifiedFollowing)
+            .with_termination_date_convention(BusinessDayConvention::ModifiedFollowing)
+            .with_calendar(cal)
+            .build()
+            .unwrap();
+
+        //28-07-2026;28-07-2027;28-07-2028;30-07-2029;29-07-2030;28-07-2031;28-07-2032;28-07-2033;28-07-2034;30-07-2035
+        let expected = vec![
+            Date::new(2025, 7, 28),
+            Date::new(2026, 7, 28),
+            Date::new(2027, 7, 28),
+            Date::new(2028, 7, 28),
+            Date::new(2029, 7, 30),
+            Date::new(2030, 7, 29),
+            Date::new(2031, 7, 28),
+            Date::new(2032, 7, 28),
+            Date::new(2033, 7, 28),
+            Date::new(2034, 7, 28),
+            Date::new(2035, 7, 30),
+        ];
+        assert_eq!(schedule.dates().clone(), expected);
+    }
+
+    #[test]
+    fn test_make_schedule_sofr_calendar_10years_2() {
+        let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
+        let from = Date::new(2025, 7, 25);
+        let to = from + Period::new(10, TimeUnit::Years);
+        let schedule = MakeSchedule::new(from, to)
+            .with_frequency(Frequency::Annual)
+            .with_convention(BusinessDayConvention::ModifiedFollowing)
+            .with_termination_date_convention(BusinessDayConvention::ModifiedFollowing)
+            .with_calendar(cal)
+            .build()
+            .unwrap();
+
+        //27-07-2026; 26-07-2027; 25-07-2028; 25-07-2029; 25-07-2030; 25-07-2031; 26-07-2032; 25-07-2033; 25-07-2034; 25-07-2035
+        let expected = vec![
+            Date::new(2025, 7, 25),
+            Date::new(2026, 7, 27),
+            Date::new(2027, 7, 26),
+            Date::new(2028, 7, 25),
+            Date::new(2029, 7, 25),
+            Date::new(2030, 7, 25),
+            Date::new(2031, 7, 25),
+            Date::new(2032, 7, 26),
+            Date::new(2033, 7, 25),
+            Date::new(2034, 7, 25),
+            Date::new(2035, 7, 25),
+        ];
+        assert_eq!(schedule.dates().clone(), expected);
+    }
+
+    #[test]
+    fn test_make_schedule_sofr_calendar_15years_1() {
+        let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
+        let from = Date::new(2025, 7, 25);
+        let to = from + Period::new(15, TimeUnit::Years);
+        let schedule = MakeSchedule::new(from, to)
+            .with_frequency(Frequency::Annual)
+            .with_convention(BusinessDayConvention::ModifiedFollowing)
+            .with_termination_date_convention(BusinessDayConvention::ModifiedFollowing)
+            .with_calendar(cal)
+            .build()
+            .unwrap();
+
+        //27-07-2026; 26-07-2027; 25-07-2028; 25-07-2029; 25-07-2030; 25-07-2031; 26-07-2032; 25-07-2033; 25-07-2034; 25-07-2035; 27-07-2040
+        let expected = vec![
+            Date::new(2025, 7, 25),
+            Date::new(2026, 7, 27),
+            Date::new(2027, 7, 26),
+            Date::new(2028, 7, 25),
+            Date::new(2029, 7, 25),
+            Date::new(2030, 7, 25),
+            Date::new(2031, 7, 25),
+            Date::new(2032, 7, 26),
+            Date::new(2033, 7, 25),
+            Date::new(2034, 7, 25),
+            Date::new(2035, 7, 25),
+            Date::new(2037, 7, 27),
+            Date::new(2040, 7, 25),
+        ];
+        let dates = schedule.dates().clone();
+
+        expected.iter().for_each(|d| {
+            assert!(dates.contains(d));
+        });
     }
 }
