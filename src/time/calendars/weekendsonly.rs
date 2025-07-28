@@ -114,4 +114,64 @@ mod tests {
         assert_eq!(cal.is_business_day(&Date::new(2023, 8, 23)), true);
         assert_eq!(cal.is_business_day(&Date::new(2023, 8, 25)), true);
     }
+
+    #[test]
+    fn test_weekends_only_weekend_days() {
+        let cal = WeekendsOnly::new();
+        // Saturday
+        assert_eq!(cal.is_business_day(&Date::new(2024, 6, 22)), false);
+        // Sunday
+        assert_eq!(cal.is_business_day(&Date::new(2024, 6, 23)), false);
+    }
+
+    #[test]
+    fn test_weekends_only_weekdays() {
+        let cal = WeekendsOnly::new();
+        // Monday
+        assert_eq!(cal.is_business_day(&Date::new(2024, 6, 24)), true);
+        // Friday
+        assert_eq!(cal.is_business_day(&Date::new(2024, 6, 28)), true);
+    }
+
+    #[test]
+    fn test_holiday_list_includes_added_holidays() {
+        let mut cal = WeekendsOnly::new();
+        let holiday = Date::new(2024, 12, 25);
+        cal.add_holiday(holiday);
+        let holidays = cal.holiday_list(Date::new(2024, 12, 24), Date::new(2024, 12, 26), true);
+        assert!(holidays.contains(&holiday));
+    }
+
+    #[test]
+    fn test_holiday_list_excludes_weekends_when_flag_false() {
+        let cal = WeekendsOnly::new();
+        let holidays = cal.holiday_list(Date::new(2024, 6, 21), Date::new(2024, 6, 23), false);
+        // 2024-06-22 is Saturday, 2024-06-23 is Sunday, both should be excluded
+        assert!(holidays.is_empty());
+    }
+
+    #[test]
+    fn test_business_day_list_range() {
+        let cal = WeekendsOnly::new();
+        let business_days = cal.business_day_list(Date::new(2024, 6, 21), Date::new(2024, 6, 25));
+        let expected = vec![
+            Date::new(2024, 6, 21), // Friday
+            Date::new(2024, 6, 24), // Monday
+            Date::new(2024, 6, 25), // Tuesday
+        ];
+        assert_eq!(business_days, expected);
+    }
+
+    #[test]
+    fn test_added_and_removed_holidays_sets() {
+        let mut cal = WeekendsOnly::new();
+        let date1 = Date::new(2024, 1, 1);
+        let date2 = Date::new(2024, 12, 31);
+        cal.add_holiday(date1);
+        cal.remove_holiday(date2);
+        let added = cal.added_holidays();
+        let removed = cal.removed_holidays();
+        assert!(added.contains(&date1));
+        assert!(removed.contains(&date2));
+    }
 }

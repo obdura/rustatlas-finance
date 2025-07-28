@@ -2,10 +2,7 @@ use std::collections::HashSet;
 
 use chrono::{Datelike, NaiveDate, Weekday};
 
-use crate::{
-    prelude::NaiveDateExt,
-    time::{calendars::traits::easter_monday, date::Date},
-};
+use crate::time::{calendars::traits::easter_monday, date::{Date, NaiveDateExt}};
 
 use super::traits::{ImplCalendar, IsCalendar};
 
@@ -524,4 +521,72 @@ mod tests {
             assert_eq!(cal.is_business_day(&d), false);
         }
     }
+
+    #[test]
+    fn test_nyse_holidays() {
+        let cal = UnitedStates::new(UnitedStatesMarket::Nyse);
+        // New Year's Day 2024 (Monday)
+        assert_eq!(cal.is_business_day(&Date::new(2024, 1, 1)), false);
+        // Independence Day 2023 (Tuesday)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 7, 4)), false);
+        // Thanksgiving 2022 (Thursday)
+        assert_eq!(cal.is_business_day(&Date::new(2022, 11, 24)), false);
+        // Christmas 2022 (Sunday, observed Monday)
+        assert_eq!(cal.is_business_day(&Date::new(2022, 12, 26)), false);
+        // Good Friday 2023 (April 7)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 4, 7)), false);
+    }
+
+    #[test]
+    fn test_settlement_holidays() {
+        let cal = UnitedStates::new(UnitedStatesMarket::Settlement);
+        // Memorial Day 2023 (May 29)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 5, 29)), false);
+        // Labor Day 2023 (September 4)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 9, 4)), false);
+        // Columbus Day 2023 (October 9)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 10, 9)), false);
+        // Veterans Day 2023 (Saturday, observed Friday)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 11, 10)), false);
+    }
+
+
+    #[test]
+    fn test_federal_reserve_holidays() {
+        let cal = UnitedStates::new(UnitedStatesMarket::FederalReserve);
+        // Juneteenth 2023 (Monday)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 6, 19)), false);
+        // Christmas 2022 (Monday observed)
+        assert_eq!(cal.is_business_day(&Date::new(2022, 12, 26)), false);
+        // Independence Day 2022 (Monday)
+        assert_eq!(cal.is_business_day(&Date::new(2022, 7, 4)), false);
+    }
+
+    #[test]
+    fn test_nerc_holidays() {
+        let cal = UnitedStates::new(UnitedStatesMarket::Nerc);
+        // Thanksgiving 2023 (November 23)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 11, 23)), false);
+        // Christmas 2023 (Monday observed)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 12, 25)), false);
+        // New Year's Day 2023 (Sunday, observed Monday)
+        assert_eq!(cal.is_business_day(&Date::new(2023, 1, 2)), false);
+    }
+
+    #[test]
+    fn test_weekends_are_not_business_days() {
+        let cal = UnitedStates::new(UnitedStatesMarket::Nyse);
+        // Saturday
+        assert_eq!(cal.is_business_day(&Date::new(2023, 7, 8)), false);
+        // Sunday
+        assert_eq!(cal.is_business_day(&Date::new(2023, 7, 9)), false);
+    }
+
+    #[test]
+    fn test_regular_business_day() {
+        let cal = UnitedStates::new(UnitedStatesMarket::Nyse);
+        // Wednesday, not a holiday
+        assert_eq!(cal.is_business_day(&Date::new(2023, 7, 5)), true);
+    }
+
 }

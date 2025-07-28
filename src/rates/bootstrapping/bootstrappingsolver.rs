@@ -386,4 +386,40 @@ mod tests {
 
         Ok(())
     }
+
+
+    #[test]
+    fn test_bootstrapping_solver_run_optimization_updates_discount_factors() -> Result<()> {
+        let ref_date = Date::new(2025, 7, 18);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        engine.market_store_mut().add_curve(5, Currency::USD)?;
+
+        let end_date = ref_date + Period::new(3, TimeUnit::Days);
+        let inst1 = make_fixed_instruments(ref_date, end_date, 0.0434, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst1))?;
+
+        let optimization_orders = vec![vec![(5, 1)]];
+        let engine_cell = RefCell::new(engine);
+        let solver = BootstrappingSolver::new(&engine_cell)?;
+        solver.run(optimization_orders)?;
+
+        let binding = engine_cell.borrow();
+        let curve = binding.market_store().curves_map().get(&5).unwrap().discount_factors().get(0).unwrap();
+        assert!(*curve > 0.0 && *curve <= 1.0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_bootstrapping_solver_run_with_empty_orders_does_nothing() -> Result<()> {
+        let ref_date = Date::new(2025, 7, 18);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        engine.market_store_mut().add_curve(5, Currency::USD)?;
+
+        let engine_cell = RefCell::new(engine);
+        let solver = BootstrappingSolver::new(&engine_cell)?;
+        let optimization_orders: Vec<Vec<(usize, usize)>> = vec![];
+        let result = solver.run(optimization_orders);
+        assert!(result.is_ok());
+        Ok(())
+    }
 }

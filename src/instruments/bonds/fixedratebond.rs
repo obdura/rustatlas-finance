@@ -247,21 +247,15 @@ impl Display for FixedRateBond {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cashflows::{cashflow::Cashflow, side::Side, traits::Payable},
-        currencies::enums::Currency,
-        instruments::{
+        cashflows::{cashflow::Cashflow, side::Side, traits::Payable}, core::traits::HasDiscountCurveId, currencies::enums::Currency, instruments::{
             bonds::traits::InteresAccrualAtYieldRate,
             constructors::makefixedratebond::MakeFixedRateBond,
-        },
-        rates::{enums::Compounding, interestrate::InterestRate},
-        time::{
+        }, rates::{enums::Compounding, interestrate::InterestRate}, time::{
             date::Date,
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        },
-        utils::errors::Result,
-        visitors::traits::HasCashflows,
+        }, utils::errors::Result, visitors::traits::HasCashflows
     };
 
     #[test]
@@ -661,4 +655,163 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_set_discount_curve_id() -> Result<()> {
+        let start_date = Date::new(2024, 1, 1);
+        let end_date = start_date + Period::new(3, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.05,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Thirty360,
+        );
+
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_payment_frequency(Frequency::Annual)
+            .with_rate(rate)
+            .with_notional(1_000_000.0)
+            .with_side(Side::Pay)
+            .with_currency(Currency::EUR)
+            .bullet()
+            .build()?;
+
+        let instrument = instrument.set_discount_curve_id(42);
+
+        assert_eq!(instrument.discount_curve_id(), Some(42));
+        instrument.cashflows().for_each(|cf| {
+            assert_eq!(cf.discount_curve_id().unwrap(), 42);
+        });
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_display_trait() -> Result<()> {
+        let start_date = Date::new(2023, 6, 15);
+        let end_date = start_date + Period::new(2, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.04,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        );
+
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_payment_frequency(Frequency::Annual)
+            .with_rate(rate)
+            .with_notional(2_000_000.0)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .bullet()
+            .build()?;
+
+        let display = format!("{}", instrument);
+        assert!(display.contains("Instrument: id:"));
+        assert!(display.contains("notional: 2000000"));
+        assert!(display.contains("currency: Ok(USD)"));
+        assert!(display.contains("start_date:"));
+        assert!(display.contains("end_date:"));
+        assert!(display.contains("cashflows:"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_bond_with_issue_and_purchase_date() -> Result<()> {
+        let start_date = Date::new(2022, 1, 1);
+        let end_date = start_date + Period::new(1, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.03,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Actual365,
+        );
+        let issue_date = Some(Date::new(2021, 12, 15));
+        let purchase_date = Some(Date::new(2022, 1, 10));
+
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_payment_frequency(Frequency::Annual)
+            .with_rate(rate)
+            .with_notional(100_000.0)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_issue_date(issue_date.unwrap())
+            .with_purchase_date(purchase_date.unwrap())
+            .bullet()
+            .build()?;
+
+        assert_eq!(instrument.issue_date(), issue_date);
+        assert_eq!(instrument.purchase_date(), purchase_date.unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_bond_id_and_mnemonic() -> Result<()> {
+        let start_date = Date::new(2023, 1, 1);
+        let end_date = start_date + Period::new(1, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.025,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Actual365,
+        );
+        let id = Some("BOND123".to_string());
+        let mnemonic = Some("MYBOND".to_string());
+
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_payment_frequency(Frequency::Annual)
+            .with_rate(rate)
+            .with_notional(50_000.0)
+            .with_side(Side::Pay)
+            .with_currency(Currency::EUR)
+            .with_id(id.clone())
+            .with_mnemonic(mnemonic.clone())
+            .bullet()
+            .build()?;
+
+        assert_eq!(instrument.id(), id);
+        assert_eq!(instrument.mnemonic(), mnemonic);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_bond_zero_notional() -> Result<()> {
+        let start_date = Date::new(2024, 1, 1);
+        let end_date = start_date + Period::new(1, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.05,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Thirty360,
+        );
+
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_payment_frequency(Frequency::Annual)
+            .with_rate(rate)
+            .with_yield_rate(rate)
+            .with_notional(0.0)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .bullet()
+            .build()?;
+
+        let accrual = instrument.accrual_amount_at_yield_rate(start_date, end_date)?;
+        assert!((accrual - 0.0).abs() < 1e-6);
+
+        Ok(())
+    }
+
 }

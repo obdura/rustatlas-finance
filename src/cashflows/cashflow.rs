@@ -362,4 +362,68 @@ mod tests {
         let deserialized: Cashflow = serde_json::from_str(&serialized).unwrap();
         assert_eq!(cashflow, deserialized);
     }
+
+    #[test]
+    fn display_redemption_test() {
+        let cashflow = Cashflow::Redemption(SimpleCashflow::new(
+            Date::new(2024, 1, 1),
+            Currency::USD,
+            Side::Pay,
+        ));
+        let display = format!("{}", cashflow);
+        assert!(display.contains("Pay date:"));
+        assert!(display.contains("redemp"));
+        assert!(display.contains("USD"));
+    }
+
+    #[test]
+    fn scale_redemption_test() {
+        let mut cashflow = Cashflow::Redemption(SimpleCashflow::new(
+            Date::new(2024, 1, 1),
+            Currency::USD,
+            Side::Receive,
+        ));
+        assert!(cashflow.scale(2.0).is_ok());
+    }
+
+    #[test]
+    fn set_and_get_discount_curve_id() {
+        let mut cashflow = Cashflow::Redemption(SimpleCashflow::new(
+            Date::new(2024, 1, 1),
+            Currency::USD,
+            Side::Receive,
+        ));
+        cashflow.set_discount_curve_id(42);
+        assert_eq!(cashflow.discount_curve_id().unwrap(), 42);
+    }
+
+    #[test]
+    fn cashflow_type_to_string() {
+        assert_eq!(String::from(CashflowType::Redemption), "Redemption");
+        assert_eq!(String::from(CashflowType::Disbursement), "Disbursement");
+        assert_eq!(String::from(CashflowType::FixedRateCoupon), "FixedRateCoupon");
+        assert_eq!(String::from(CashflowType::FloatingRateCoupon), "FloatingRateCoupon");
+    }
+
+    #[test]
+    fn interest_accrual_error_on_redemption() {
+        let cashflow = Cashflow::Redemption(SimpleCashflow::new(
+            Date::new(2024, 1, 1),
+            Currency::USD,
+            Side::Receive,
+        ));
+        assert!(cashflow.accrual_start_date().is_err());
+        assert!(cashflow.accrual_end_date().is_err());
+    }
+
+    #[test]
+    fn requires_fixing_rate_error_on_redemption() {
+        let cashflow = Cashflow::Redemption(SimpleCashflow::new(
+            Date::new(2024, 1, 1),
+            Currency::USD,
+            Side::Receive,
+        ));
+        assert!(cashflow.fixing_start_date().is_err());
+        assert!(cashflow.fixing_end_date().is_err());
+    }
 }

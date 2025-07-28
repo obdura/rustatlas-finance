@@ -380,7 +380,7 @@ pub struct BootstrappingModel<'a> {
 }
 
 impl<'a> BootstrappingModel<'a> {
-    pub fn new(market_store: &'a BootstrappingMarketStore) -> BootstrappingModel {
+    pub fn new(market_store: &'a BootstrappingMarketStore) -> BootstrappingModel<'a> {
         BootstrappingModel { market_store }
     }
 }
@@ -491,9 +491,9 @@ impl<'a> Model for BootstrappingModel<'a> {
 mod tests {
     use crate::{
         currencies::enums::Currency,
-        rates::bootstrapping::bootstrappingmarketstore::{
+        rates::{bootstrapping::bootstrappingmarketstore::{
             BootstrappingCurve, BootstrappingMarketStore,
-        },
+        }, traits::YieldProvider},
         time::date::Date,
         utils::errors::Result,
     };
@@ -548,4 +548,185 @@ mod tests {
         assert_eq!(store.curves_map[&1].currency(), Currency::USD);
         Ok(())
     }
+
+    #[test]
+    fn test_add_curve_duplicate_id() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        store.add_curve(1, Currency::USD).unwrap();
+        let result = store.add_curve(1, Currency::USD);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_date_before_reference_date() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut curve = BootstrappingCurve::new(ref_date, 1, Currency::USD);
+        let date = Date::new(2021, 12, 31);
+        let result = curve.add_date(date, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_date_duplicate() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut curve = BootstrappingCurve::new(ref_date, 1, Currency::USD);
+        let date = Date::new(2023, 1, 1);
+        curve.add_date(date, 0).unwrap();
+        let result = curve.add_date(date, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_discount_factor_reference_date() {
+        let ref_date = Date::new(2022, 1, 1);
+        let curve = BootstrappingCurve::new(ref_date, 1, Currency::USD);
+        let df = curve.discount_factor(ref_date).unwrap();
+        assert_eq!(df, 1.0);
+    }
+
+    #[test]
+    fn test_discount_factor_before_reference_date() {
+        let ref_date = Date::new(2022, 1, 1);
+        let curve = BootstrappingCurve::new(ref_date, 1, Currency::USD);
+        let date = Date::new(2021, 12, 31);
+        let result = curve.discount_factor(date);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_exchange_rate_same_currency() {
+        let ref_date = Date::new(2022, 1, 1);
+        let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        let rate = store.get_exchange_rate(Currency::USD, Currency::USD).unwrap();
+        assert_eq!(rate, 1.0);
+    }
+
+    #[test]
+    fn test_exchange_rate_direct() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+        let rate = store.get_exchange_rate(Currency::USD, Currency::EUR).unwrap();
+        assert_eq!(rate, 0.9);
+        let reverse_rate = store.get_exchange_rate(Currency::EUR, Currency::USD).unwrap();
+        assert!((reverse_rate - 1.0 / 0.9).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_exchange_rate_indirect() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+        store.add_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
+        let rate = store.get_exchange_rate(Currency::USD, Currency::GBP).unwrap();
+        assert!((rate - 0.9 * 0.8).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_exchange_rate_not_found() {
+        let ref_date = Date::new(2022, 1, 1);
+        let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        let result = store.get_exchange_rate(Currency::USD, Currency::EUR);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_currency_forescast_factor_same_currency() {
+        let ref_date = Date::new(2022, 1, 1);
+        let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        let date = Date::new(2023, 1, 1);
+        let factor = store.currency_forescast_factor(Currency::USD, Currency::USD, date).unwrap();
+        assert_eq!(factor, 1.0);
+    }
+
+    #[test]
+    fn test_get_currency_curve_not_found() {
+        let ref_date = Date::new(2022, 1, 1);
+        let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        let result = store.get_currency_curve(Currency::EUR);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_with_exchange_rates_overwrites() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        let mut rates = std::collections::HashMap::new();
+        rates.insert((Currency::USD, Currency::EUR), 0.9);
+        store.with_exchange_rates(rates.clone());
+        assert_eq!(store.get_exchange_rate_map(), rates);
+        let mut new_rates = std::collections::HashMap::new();
+        new_rates.insert((Currency::USD, Currency::GBP), 0.8);
+        store.with_exchange_rates(new_rates.clone());
+        assert_eq!(store.get_exchange_rate_map(), new_rates);
+    }
+
+    #[test]
+    fn test_discount_factor_interpolation() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut curve = BootstrappingCurve::new(ref_date, 1, Currency::USD);
+        let date1 = Date::new(2023, 1, 1);
+        let date2 = Date::new(2024, 1, 1);
+        curve.add_date(date1, 0).unwrap();
+        curve.add_date(date2, 1).unwrap();
+        curve.discount_factors_mut()[1] = 0.95;
+        curve.discount_factors_mut()[2] = 0.90;
+        let mid_date = Date::new(2023, 7, 2);
+        let df = curve.discount_factor(mid_date).unwrap();
+        assert!(df < 0.95 && df > 0.90);
+    }
+
+    #[test]
+    fn test_forward_rate_simple() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut curve = BootstrappingCurve::new(ref_date, 1, Currency::USD);
+        let date1 = Date::new(2023, 1, 1);
+        let date2 = Date::new(2024, 1, 1);
+        curve.add_date(date1, 0).unwrap();
+        curve.add_date(date2, 1).unwrap();
+        curve.discount_factors_mut()[1] = 0.95;
+        curve.discount_factors_mut()[2] = 0.90;
+        let fwd = curve.forward_rate(date1, date2, crate::rates::enums::Compounding::Simple, crate::time::enums::Frequency::Annual).unwrap();
+        assert!(fwd > 0.0);
+    }
+
+    #[test]
+    fn test_exchange_rate_cache() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+        store.add_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
+        // First call populates cache
+        let rate1 = store.get_exchange_rate(Currency::USD, Currency::GBP).unwrap();
+        // Remove from map to ensure cache is used
+        store.exchange_rate_map.clear();
+        let rate2 = store.get_exchange_rate(Currency::USD, Currency::GBP).unwrap();
+        assert!((rate1 - rate2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_currency_forescast_factor_error_on_missing_curve() {
+        let ref_date = Date::new(2022, 1, 1);
+        let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
+        let date = Date::new(2023, 1, 1);
+        // No curves added
+        let result = store.currency_forescast_factor(Currency::USD, Currency::EUR, date);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_date_inserts_sorted() {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut curve = BootstrappingCurve::new(ref_date, 1, Currency::USD);
+        let date1 = Date::new(2023, 6, 1);
+        let date2 = Date::new(2023, 1, 1);
+        let date3 = Date::new(2024, 1, 1);
+        curve.add_date(date1, 0).unwrap();
+        curve.add_date(date2, 1).unwrap();
+        curve.add_date(date3, 2).unwrap();
+        assert_eq!(curve.dates, vec![ref_date, date2, date1, date3]);
+    }
+
+
 }

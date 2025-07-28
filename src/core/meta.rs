@@ -1,9 +1,9 @@
-use crate::{
-    currencies::enums::Currency,
-    rates::enums::Compounding,
-    time::{date::Date, enums::Frequency},
-    utils::errors::{AtlasError, Result},
-};
+use crate::currencies::enums::Currency;
+use crate::rates::enums::Compounding;
+use crate::time::date::Date;
+use crate::time::enums::Frequency;
+
+use crate::utils::errors::{AtlasError, Result};
 
 /// # ExchangeRateRequest
 /// Meta data for an exchange rate. Holds the first currency, the second currency and the reference
@@ -260,5 +260,103 @@ impl MarketData {
 
     pub fn numerarie(&self) -> f64 {
         self.numerarie
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    fn sample_date() -> Date {
+        Date::new(2024, 6, 1)
+    }
+
+    #[test]
+    fn test_exchange_rate_request_new_and_accessors() {
+        let req = ExchangeRateRequest::new(Currency::USD, Some(Currency::EUR), Some(sample_date()));
+        assert_eq!(req.first_currency(), Currency::USD);
+        assert_eq!(req.second_currency(), Some(Currency::EUR));
+        assert_eq!(req.reference_date(), Some(sample_date()));
+    }
+
+    #[test]
+    fn test_discount_factor_request_new_and_accessors() {
+        let req = DiscountFactorRequest::new(42, sample_date());
+        assert_eq!(req.provider_id(), 42);
+        assert_eq!(req.date(), sample_date());
+        assert_eq!(req.discount_currency(), None);
+
+        let req2 = DiscountFactorRequest::new_with_discount_currency(7, sample_date(), Currency::JPY);
+        assert_eq!(req2.provider_id(), 7);
+        assert_eq!(req2.discount_currency(), Some(Currency::JPY));
+    }
+
+    #[test]
+    fn test_discount_factor_request_set_discount_currency() {
+        let mut req = DiscountFactorRequest::new(1, sample_date());
+        req.set_discount_currency(Currency::GBP);
+        assert_eq!(req.discount_currency(), Some(Currency::GBP));
+    }
+
+    #[test]
+    fn test_forward_rate_request_new_and_accessors() {
+        let req = ForwardRateRequest::new(
+            99,
+            sample_date(),
+            sample_date(),
+            Compounding::Simple,
+            Frequency::Annual,
+        );
+        assert_eq!(req.provider_id(), 99);
+        assert_eq!(req.start_date(), sample_date());
+        assert_eq!(req.end_date(), sample_date());
+        assert_eq!(req.compounding(), Compounding::Simple);
+        assert_eq!(req.frequency(), Frequency::Annual);
+    }
+
+    #[test]
+    fn test_market_request_new_and_accessors() {
+        let df_req = DiscountFactorRequest::new(1, sample_date());
+        let fwd_req = ForwardRateRequest::new(2, sample_date(), sample_date(), Compounding::Simple, Frequency::Annual);
+        let fx_req = ExchangeRateRequest::new(Currency::USD, Some(Currency::EUR), Some(sample_date()));
+        let fx_fwd_req = ExchangeRateRequest::new(Currency::USD, Some(Currency::JPY), Some(sample_date()));
+
+        let req = MarketRequest::new(123, Some(df_req), Some(fwd_req), Some(fx_req), Some(fx_fwd_req));
+        assert_eq!(req.id(), 123);
+        assert_eq!(req.df(), Some(df_req));
+        assert_eq!(req.fwd(), Some(fwd_req));
+        assert_eq!(req.fx(), Some(fx_req));
+        assert_eq!(req.fx_fwd(), Some(fx_fwd_req));
+    }
+
+    #[test]
+    fn test_market_data_new_and_accessors() {
+        let data = MarketData::new(
+            10,
+            sample_date(),
+            Some(0.95),
+            Some(0.02),
+            Some(1.1),
+            Some(1.15),
+            100.0,
+        );
+        assert_eq!(data.id(), 10);
+        assert_eq!(data.reference_date(), sample_date());
+        assert_eq!(data.df().unwrap(), 0.95);
+        assert_eq!(data.fwd().unwrap(), 0.02);
+        assert_eq!(data.fx().unwrap(), 1.1);
+        assert_eq!(data.fx_fwd().unwrap(), 1.15);
+        assert_eq!(data.numerarie(), 100.0);
+    }
+
+    #[test]
+    fn test_market_data_missing_values() {
+        let data = MarketData::new(1, sample_date(), None, None, None, None, 1.0);
+        assert!(data.df().is_err());
+        assert!(data.fwd().is_err());
+        assert!(data.fx().is_err());
+        assert!(data.fx_fwd().is_err());
     }
 }

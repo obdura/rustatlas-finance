@@ -83,6 +83,15 @@ impl FloatingRateCoupon {
         self
     }
 
+    pub fn set_fixing_dates(
+        &mut self,
+        fixing_start_date: Date,
+        fixing_end_date: Date,
+    ) {
+        self.fixing_start_date = Some(fixing_start_date);
+        self.fixing_end_date = Some(fixing_end_date);
+    }
+
     pub fn with_discount_curve_id(mut self, id: usize) -> FloatingRateCoupon {
         self.cashflow.set_discount_curve_id(id);
         self
@@ -140,6 +149,14 @@ impl FloatingRateCoupon {
     pub fn with_payment_currency(&mut self, currency: Currency) -> &mut FloatingRateCoupon {
         self.cashflow.set_payment_currency(currency);
         self
+    }
+
+    pub fn set_exchange_fixing_date(&mut self, date: Date) {
+        self.cashflow.set_exchange_fixing_date(date);
+    }
+
+    pub fn set_payment_currency(&mut self, currency: Currency) {
+        self.cashflow.set_payment_currency(currency);
     }
 }
 
@@ -333,5 +350,173 @@ mod tests {
         assert!((coupon.amount()? - 50.0 * 2.5).abs() < 1e-6);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_new_and_setters() -> Result<()> {
+        let notional = 5000.0;
+        let spread = 0.01;
+        let accrual_start_date = Date::new(2022, 6, 1);
+        let accrual_end_date = Date::new(2022, 12, 1);
+        let payment_date = Date::new(2022, 12, 2);
+        let currency = Currency::USD;
+        let rate_definition = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Simple,
+            Frequency::Annual,
+        );
+
+        let mut coupon = FloatingRateCoupon::new(
+            notional,
+            spread,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            rate_definition,
+            currency,
+            Side::Receive,
+        );
+
+        assert_eq!(coupon.notional(), notional);
+        assert_eq!(coupon.spread(), spread);
+        assert_eq!(coupon.rate_definition(), rate_definition);
+
+        coupon.set_notional(10000.0);
+        assert_eq!(coupon.notional(), 10000.0);
+
+        coupon.set_spread(0.015);
+        assert_eq!(coupon.spread(), 0.015);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_fixing_rate_and_amount() -> Result<()> {
+        let notional = 2000.0;
+        let spread = 0.005;
+        let accrual_start_date = Date::new(2023, 3, 1);
+        let accrual_end_date = Date::new(2023, 9, 1);
+        let payment_date = Date::new(2023, 9, 2);
+        let currency = Currency::EUR;
+        let rate_definition = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Simple,
+            Frequency::Annual,
+        );
+
+        let mut coupon = FloatingRateCoupon::new(
+            notional,
+            spread,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            rate_definition,
+            currency,
+            Side::Receive,
+        );
+
+        coupon.set_fixing_rate(0.02);
+        let amount = coupon.amount()?;
+        assert!(amount > 0.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_accrued_amount_map() -> Result<()> {
+        let notional = 1000.0;
+        let spread = 0.01;
+        let accrual_start_date = Date::new(2023, 1, 1);
+        let accrual_end_date = Date::new(2023, 1, 5);
+        let payment_date = Date::new(2023, 1, 6);
+        let currency = Currency::GBP;
+        let rate_definition = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Simple,
+            Frequency::Annual,
+        );
+
+        let mut coupon = FloatingRateCoupon::new(
+            notional,
+            spread,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            rate_definition,
+            currency,
+            Side::Pay,
+        );
+
+        coupon.set_fixing_rate(0.015);
+
+        let map = coupon.accrued_amount_map()?;
+        assert_eq!(map.len(), 5);
+        assert!(map.values().all(|v| v.is_finite()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_fixing_dates_and_forecast_curve_id() -> Result<()> {
+        let notional = 1000.0;
+        let spread = 0.01;
+        let accrual_start_date = Date::new(2023, 1, 1);
+        let accrual_end_date = Date::new(2023, 1, 10);
+        let payment_date = Date::new(2023, 1, 11);
+        let currency = Currency::CHF;
+        let rate_definition = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Simple,
+            Frequency::Annual,
+        );
+
+        let mut coupon = FloatingRateCoupon::new(
+            notional,
+            spread,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            rate_definition,
+            currency,
+            Side::Receive,
+        );
+
+        coupon.set_fixing_dates(Date::new(2023, 1, 2), Date::new(2023, 1, 9));
+        coupon.set_forecast_curve_id(42);
+
+        assert_eq!(coupon.fixing_start_date()?, Date::new(2023, 1, 2));
+        assert_eq!(coupon.fixing_end_date()?, Date::new(2023, 1, 9));
+        assert_eq!(coupon.forecast_curve_id()?, 42);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_expired() {
+        let notional = 1000.0;
+        let spread = 0.01;
+        let accrual_start_date = Date::new(2023, 1, 1);
+        let accrual_end_date = Date::new(2023, 1, 10);
+        let payment_date = Date::new(2023, 1, 11);
+        let currency = Currency::USD;
+        let rate_definition = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Simple,
+            Frequency::Annual,
+        );
+
+        let coupon = FloatingRateCoupon::new(
+            notional,
+            spread,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            rate_definition,
+            currency,
+            Side::Pay,
+        );
+
+        assert!(!coupon.is_expired(Date::new(2023, 1, 10)));
+        assert!(coupon.is_expired(Date::new(2023, 1, 12)));
     }
 }

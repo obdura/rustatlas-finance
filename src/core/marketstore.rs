@@ -1,11 +1,21 @@
+use crate::currencies::enums::Currency;
+use crate::time::date::Date;
+use crate::time::enums::TimeUnit;
+use crate::time::period::Period;
 use core::fmt;
 use std::sync::{Arc, RwLock};
 
 use crate::{
-    currencies::{enums::Currency, exchangeratestore::ExchangeRateStore, traits::{AdvanceExchangeRateStoreInTime, CurrencyDetails}}, rates::{
-        indexstore::{IndexStore, ReadIndex}, interestrateindex::traits::InterestRateIndexTrait,
+    currencies::{
+        exchangeratestore::ExchangeRateStore,
+        traits::{AdvanceExchangeRateStoreInTime, CurrencyDetails},
+    },
+    rates::{
+        indexstore::{IndexStore, ReadIndex},
+        interestrateindex::traits::InterestRateIndexTrait,
         traits::HasReferenceDate,
-    }, time::{date::Date, enums::TimeUnit, period::Period}, utils::errors::{AtlasError, Result}
+    },
+    utils::errors::{AtlasError, Result},
 };
 
 /// # MarketStore
@@ -80,9 +90,11 @@ impl MarketStore {
             )));
         }
         let new_reference_date = self.reference_date + period;
-        let new_exchange_rate_store = self.exchange_rate_store.advance_to_period(period, &self.index_store)?;
+        let new_exchange_rate_store = self
+            .exchange_rate_store
+            .advance_to_period(period, &self.index_store)?;
         let new_index_store = self.index_store.advance_to_period(period)?;
-        
+
         Ok(MarketStore {
             reference_date: new_reference_date,
             local_currency: self.local_currency,
@@ -115,41 +127,191 @@ impl HasReferenceDate for MarketStore {
 use colored::*; // Import the colored crate
 impl fmt::Display for MarketStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "\n{}", "=====================================".blue().bold())?;
-        writeln!(f, "{}", "======= MarketStore features! =======".blue().bold())?;
-        writeln!(f, "{}", "=====================================".blue().bold())?;
-        writeln!(f, "{} {}", "> Reference Date:".green().bold(), self.reference_date)?;
-        writeln!(f, "{}", "-------------------------------------".blue().bold())?;
-        writeln!(f, "{} {}", "> Currency:".green().bold(), self.local_currency.code())?;
-        writeln!(f, "{}", "-------------------------------------".blue().bold())?;
+        writeln!(
+            f,
+            "\n{}",
+            "=====================================".blue().bold()
+        )?;
+        writeln!(
+            f,
+            "{}",
+            "======= MarketStore features! =======".blue().bold()
+        )?;
+        writeln!(
+            f,
+            "{}",
+            "=====================================".blue().bold()
+        )?;
+        writeln!(
+            f,
+            "{} {}",
+            "> Reference Date:".green().bold(),
+            self.reference_date
+        )?;
+        writeln!(
+            f,
+            "{}",
+            "-------------------------------------".blue().bold()
+        )?;
+        writeln!(
+            f,
+            "{} {}",
+            "> Currency:".green().bold(),
+            self.local_currency.code()
+        )?;
+        writeln!(
+            f,
+            "{}",
+            "-------------------------------------".blue().bold()
+        )?;
 
         let index_store = self.index_store();
         let all_indices = index_store.get_all_indices();
         let indices_map = index_store.get_index_map().unwrap();
 
-        let mut indices_names: Vec<(String, usize)> = all_indices.iter().filter_map(|indice| {
-            let ind = indice.read_index().ok()?;
-            let indice_long_name = ind.name_long_detail().ok()?;
-            let indice_name = ind.name().ok()?;
-            let id = indices_map.get(&indice_name)?;
-            Some((indice_long_name, *id))
-        }).collect();
+        let mut indices_names: Vec<(String, usize)> = all_indices
+            .iter()
+            .filter_map(|indice| {
+                let ind = indice.read_index().ok()?;
+                let indice_long_name = ind.name_long_detail().ok()?;
+                let indice_name = ind.name().ok()?;
+                let id = indices_map.get(&indice_name)?;
+                Some((indice_long_name, *id))
+            })
+            .collect();
 
         indices_names.sort_by(|a, b| a.1.cmp(&b.1));
 
-        writeln!(f, "{} ({})", "> Indices:".green().bold(), indices_names.len())?;
+        writeln!(
+            f,
+            "{} ({})",
+            "> Indices:".green().bold(),
+            indices_names.len()
+        )?;
         for (indice_name, id) in indices_names {
-            writeln!(f, "  >> {} -> {}", id.to_string().yellow().bold(), indice_name.cyan())?;
+            writeln!(
+                f,
+                "  >> {} -> {}",
+                id.to_string().yellow().bold(),
+                indice_name.cyan()
+            )?;
         }
 
         let exchange_rate_store = self.exchange_rate_store();
         let exchange_rate_map = exchange_rate_store.get_exchange_rate_map();
-        writeln!(f, "{}", "-------------------------------------".blue().bold())?;
-        writeln!(f, "{} ({})", "> Currency pairs:".green().bold(), exchange_rate_map.len())?;
+        writeln!(
+            f,
+            "{}",
+            "-------------------------------------".blue().bold()
+        )?;
+        writeln!(
+            f,
+            "{} ({})",
+            "> Currency pairs:".green().bold(),
+            exchange_rate_map.len()
+        )?;
         for (currencies, value) in &exchange_rate_map {
-            writeln!(f, "  >> {} -> {}: {}", currencies.0.code().yellow().bold(), currencies.1.code().yellow().bold(), value.to_string().magenta())?;
+            writeln!(
+                f,
+                "  >> {} -> {}: {}",
+                currencies.0.code().yellow().bold(),
+                currencies.1.code().yellow().bold(),
+                value.to_string().magenta()
+            )?;
         }
 
-        writeln!(f, "{}", "=====================================".blue().bold())
+        writeln!(
+            f,
+            "{}",
+            "=====================================".blue().bold()
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_market_store() -> MarketStore {
+        let reference_date = Date::new(2024, 1, 1);
+        let local_currency = Currency::USD;
+        MarketStore::new(reference_date, local_currency)
+    }
+
+    #[test]
+    fn test_new_market_store() {
+        let reference_date = Date::new(2024, 1, 1);
+        let local_currency = Currency::USD;
+        let market_store = MarketStore::new(reference_date, local_currency);
+
+        assert_eq!(market_store.reference_date(), reference_date);
+        assert_eq!(market_store.local_currency(), local_currency);
+    }
+
+    #[test]
+    fn test_get_exchange_rate_local_currency() {
+        let mut market_store = setup_market_store();
+        // Add a fake exchange rate for testing
+        market_store
+            .mut_exchange_rate_store()
+            .add_exchange_rate(Currency::USD, Currency::EUR, 1.1);
+        let rate = market_store
+            .get_exchange_rate(Currency::USD, Some(Currency::EUR))
+            .unwrap();
+        assert!((rate - 1.1).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_get_exchange_rate_default_to_local() {
+        let mut market_store = setup_market_store();
+        market_store
+            .mut_exchange_rate_store()
+            .add_exchange_rate(Currency::EUR, Currency::USD, 1.2);
+        let rate = market_store.get_exchange_rate(Currency::EUR, None).unwrap();
+        assert!((rate - 1.2).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_advance_to_period_positive() {
+        let market_store = setup_market_store();
+        let period = Period::new(10, TimeUnit::Days);
+        let advanced = market_store.advance_to_period(period).unwrap();
+        assert_eq!(
+            advanced.reference_date(),
+            market_store.reference_date() + period
+        );
+    }
+
+    #[test]
+    fn test_advance_to_period_negative() {
+        let market_store = setup_market_store();
+        let period = Period::new(-5, TimeUnit::Days);
+        let result = market_store.advance_to_period(period);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_advance_to_date_future() {
+        let market_store = setup_market_store();
+        let new_date = market_store.reference_date() + Period::new(5, TimeUnit::Days);
+        let advanced = market_store.advance_to_date(new_date).unwrap();
+        assert_eq!(advanced.reference_date(), new_date);
+    }
+
+    #[test]
+    fn test_advance_to_date_past() {
+        let market_store = setup_market_store();
+        let past_date = market_store.reference_date() - Period::new(1, TimeUnit::Days);
+        let result = market_store.advance_to_date(past_date);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_display_trait() {
+        let market_store = setup_market_store();
+        let output = format!("{}", market_store);
+        assert!(output.contains("MarketStore features"));
+        assert!(output.contains("Reference Date"));
+        assert!(output.contains("Currency"));
     }
 }

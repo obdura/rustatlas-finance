@@ -24,7 +24,7 @@ pub struct SimpleModel<'a> {
 }
 
 impl<'a> SimpleModel<'a> {
-    pub fn new(market_store: &'a MarketStore) -> SimpleModel {
+    pub fn new(market_store: &'a MarketStore) -> SimpleModel<'a> {
         SimpleModel { market_store }
     }
 }

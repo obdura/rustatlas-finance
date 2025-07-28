@@ -107,4 +107,36 @@ mod tests {
         assert_eq!(cal.is_business_day(&Date::new(2021, 1, 1)), true);
         assert_eq!(cal.is_business_day(&Date::new(2021, 1, 2)), true);
     }
+
+    #[test]
+    fn test_nullcalendar_remove_holiday() {
+        let mut cal = NullCalendar::new();
+        cal.add_holiday(Date::new(2021, 1, 1));
+        assert_eq!(cal.is_business_day(&Date::new(2021, 1, 1)), false);
+        cal.remove_holiday(Date::new(2021, 1, 1));
+        // Removing a holiday should not affect NullCalendar's business day logic
+        assert_eq!(cal.is_business_day(&Date::new(2021, 1, 1)), false);
+    }
+
+    #[test]
+    fn test_nullcalendar_holiday_list() {
+        let mut cal = NullCalendar::new();
+        cal.add_holiday(Date::new(2021, 1, 1));
+        cal.add_holiday(Date::new(2021, 1, 3));
+        let holidays = cal.holiday_list(Date::new(2021, 1, 1), Date::new(2021, 1, 5), true);
+        assert!(holidays.contains(&Date::new(2021, 1, 1)));
+        assert!(holidays.contains(&Date::new(2021, 1, 3)));
+        assert!(!holidays.contains(&Date::new(2021, 1, 2)));
+    }
+
+    #[test]
+    fn test_nullcalendar_business_day_list() {
+        let cal = NullCalendar::new();
+        let business_days = cal.business_day_list(Date::new(2021, 1, 1), Date::new(2021, 1, 3));
+        assert_eq!(business_days.len(), 3);
+        assert_eq!(business_days[0], Date::new(2021, 1, 1));
+        assert_eq!(business_days[1], Date::new(2021, 1, 2));
+        assert_eq!(business_days[2], Date::new(2021, 1, 3));
+    }
+
 }

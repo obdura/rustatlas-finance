@@ -104,9 +104,17 @@ impl FixedRateCoupon {
         self
     }
 
+    pub fn set_exchange_fixing_date(&mut self, date: Date) {
+        self.cashflow.set_exchange_fixing_date(date);
+    }
+
     pub fn with_payment_currency(&mut self, currency: Currency) -> &mut FixedRateCoupon {
         self.cashflow.set_payment_currency(currency);
         self
+    }
+
+    pub fn set_payment_currency(&mut self, currency: Currency) {
+        self.cashflow.set_payment_currency(currency);
     }
 }
 
@@ -356,5 +364,198 @@ mod tests {
         assert!((coupon.amount()? - 50.0 * 2.5).abs() < 1e-6);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_set_rate_value_updates_amount() {
+        let notional = 1000.0;
+        let initial_rate = InterestRate::new(
+            0.03,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Thirty360,
+        );
+        let accrual_start_date = Date::new(2023, 1, 1);
+        let accrual_end_date = Date::new(2023, 12, 31);
+        let payment_date = Date::new(2024, 1, 1);
+        let currency = Currency::EUR;
+
+        let mut coupon = FixedRateCoupon::new(
+            notional,
+            initial_rate,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            currency,
+            Side::Receive,
+        );
+
+        let new_rate_value = 0.06;
+        coupon.set_rate_value(new_rate_value);
+
+        let expected_amount = notional
+            * (InterestRate::from_rate_definition(new_rate_value, initial_rate.rate_definition())
+                .compound_factor(accrual_start_date, accrual_end_date)
+                - 1.0);
+
+        assert!((coupon.amount().unwrap() - expected_amount).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_set_notional_updates_amount() {
+        let notional = 500.0;
+        let rate = InterestRate::new(
+            0.04,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        );
+        let accrual_start_date = Date::new(2022, 1, 1);
+        let accrual_end_date = Date::new(2022, 12, 31);
+        let payment_date = Date::new(2023, 1, 1);
+        let currency = Currency::GBP;
+
+        let mut coupon = FixedRateCoupon::new(
+            notional,
+            rate,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            currency,
+            Side::Pay,
+        );
+
+        let new_notional = 800.0;
+        coupon.set_notional(new_notional);
+
+        let expected_amount = new_notional
+            * (rate.compound_factor(accrual_start_date, accrual_end_date) - 1.0);
+
+        assert!((coupon.amount().unwrap() - expected_amount).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_set_exchange_fixing_date_and_payment_currency() {
+        let notional = 1000.0;
+        let rate = InterestRate::new(
+            0.05,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Thirty360,
+        );
+        let accrual_start_date = Date::new(2023, 1, 1);
+        let accrual_end_date = Date::new(2023, 12, 31);
+        let payment_date = Date::new(2024, 1, 1);
+        let currency = Currency::JPY;
+
+        let mut coupon = FixedRateCoupon::new(
+            notional,
+            rate,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            currency,
+            Side::Pay,
+        );
+
+        let fixing_date = Date::new(2023, 12, 15);
+        let payment_currency = Currency::USD;
+
+        coupon.set_exchange_fixing_date(fixing_date);
+        coupon.set_payment_currency(payment_currency);
+
+        assert_eq!(coupon.exchange_fixing_date().unwrap(), fixing_date);
+        assert_eq!(coupon.payment_currency().unwrap(), payment_currency);
+    }
+
+    #[test]
+    fn test_is_expired_trait() {
+        let notional = 1000.0;
+        let rate = InterestRate::new(
+            0.05,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Thirty360,
+        );
+        let accrual_start_date = Date::new(2023, 1, 1);
+        let accrual_end_date = Date::new(2023, 12, 31);
+        let payment_date = Date::new(2024, 1, 1);
+        let currency = Currency::JPY;
+
+        let coupon = FixedRateCoupon::new(
+            notional,
+            rate,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            currency,
+            Side::Pay,
+        );
+
+        let before_payment = Date::new(2023, 12, 31);
+        let after_payment = Date::new(2024, 1, 2);
+
+        assert!(!coupon.is_expired(before_payment));
+        assert!(coupon.is_expired(after_payment));
+    }
+
+    #[test]
+    fn test_forecast_curve_id_returns_error() {
+        let notional = 1000.0;
+        let rate = InterestRate::new(
+            0.05,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Thirty360,
+        );
+        let accrual_start_date = Date::new(2023, 1, 1);
+        let accrual_end_date = Date::new(2023, 12, 31);
+        let payment_date = Date::new(2024, 1, 1);
+        let currency = Currency::JPY;
+
+        let coupon = FixedRateCoupon::new(
+            notional,
+            rate,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            currency,
+            Side::Pay,
+        );
+
+        let result = coupon.forecast_curve_id();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_accrued_amount_map_monotonicity() {
+        let notional = 1000.0;
+        let rate = InterestRate::new(
+            0.05,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Thirty360,
+        );
+        let accrual_start_date = Date::new(2023, 1, 1);
+        let accrual_end_date = Date::new(2023, 1, 10);
+        let payment_date = Date::new(2023, 1, 11);
+        let currency = Currency::USD;
+
+        let coupon = FixedRateCoupon::new(
+            notional,
+            rate,
+            accrual_start_date,
+            accrual_end_date,
+            payment_date,
+            currency,
+            Side::Receive,
+        );
+
+        let map = coupon.accrued_amount_map().unwrap();
+        let mut prev = 0.0;
+        for (_date, amount) in map.iter() {
+            assert!(*amount >= prev);
+            prev = *amount;
+        }
     }
 }

@@ -254,4 +254,95 @@ mod tests {
         assert_eq!(fx_forward.id().unwrap(), "test".to_string());
         Ok(())
     }
+
+    #[test]
+    fn test_fxforward_with_id() -> Result<()> {
+        let pay_date = Date::new(2021, 1, 1);
+        let pay_currency = Currency::USD;
+        let receive_currency = Currency::CLP;
+        let pay_cashflow =
+            SimpleCashflow::new(pay_date, pay_currency, Side::Pay).with_amount(50.0);
+        let receive_cashflow =
+            SimpleCashflow::new(pay_date, receive_currency, Side::Receive).with_amount(50.0);
+        let fx_forward = FxForward::new(pay_cashflow, receive_cashflow)?
+            .with_id("forward123".to_string());
+        assert_eq!(fx_forward.id().unwrap(), "forward123".to_string());
+        Ok(())
+    }
+
+    #[test]
+    fn test_fxforward_set_pay_discount_curve_id() -> Result<()> {
+        let pay_date = Date::new(2022, 2, 2);
+        let pay_currency = Currency::USD;
+        let receive_currency = Currency::CLP;
+        let pay_cashflow =
+            SimpleCashflow::new(pay_date, pay_currency, Side::Pay).with_amount(200.0);
+        let receive_cashflow =
+            SimpleCashflow::new(pay_date, receive_currency, Side::Receive).with_amount(200.0);
+        let mut fx_forward = FxForward::new(pay_cashflow, receive_cashflow)?;
+        fx_forward.set_pay_discount_curve_id(5);
+        assert_eq!(fx_forward.pay_discount_curve_id().unwrap(), 5);
+        for cf in fx_forward.pay_cashflows() {
+            assert_eq!(cf.discount_curve_id().unwrap(), 5);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_fxforward_set_receive_discount_curve_id() -> Result<()> {
+        let pay_date = Date::new(2023, 3, 3);
+        let pay_currency = Currency::USD;
+        let receive_currency = Currency::CLP;
+        let pay_cashflow =
+            SimpleCashflow::new(pay_date, pay_currency, Side::Pay).with_amount(300.0);
+        let receive_cashflow =
+            SimpleCashflow::new(pay_date, receive_currency, Side::Receive).with_amount(300.0);
+        let mut fx_forward = FxForward::new(pay_cashflow, receive_cashflow)?;
+        fx_forward.set_receive_discount_curve_id(7);
+        assert_eq!(fx_forward.receive_discount_curve_id().unwrap(), 7);
+        for cf in fx_forward.receive_cashflows() {
+            assert_eq!(cf.discount_curve_id().unwrap(), 7);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_fxforward_display_trait() -> Result<()> {
+        let pay_date = Date::new(2024, 4, 4);
+        let pay_currency = Currency::USD;
+        let receive_currency = Currency::CLP;
+        let pay_cashflow =
+            SimpleCashflow::new(pay_date, pay_currency, Side::Pay).with_amount(400.0);
+        let receive_cashflow =
+            SimpleCashflow::new(pay_date, receive_currency, Side::Receive).with_amount(400.0);
+        let fx_forward = FxForward::new(pay_cashflow, receive_cashflow)?
+            .with_id("display_test".to_string())
+            .with_mtm(123.45);
+        let display_str = format!("{}", fx_forward);
+        assert!(display_str.contains("FxForward  id:"));
+        assert!(display_str.contains("display_test"));
+        assert!(display_str.contains("Pay Currency"));
+        assert!(display_str.contains("Recive Currency"));
+        assert!(display_str.contains("Cashflows"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_fxforward_mut_cashflows() -> Result<()> {
+        let pay_date = Date::new(2025, 5, 5);
+        let pay_currency = Currency::USD;
+        let receive_currency = Currency::CLP;
+        let pay_cashflow =
+            SimpleCashflow::new(pay_date, pay_currency, Side::Pay).with_amount(500.0);
+        let receive_cashflow =
+            SimpleCashflow::new(pay_date, receive_currency, Side::Receive).with_amount(500.0);
+        let mut fx_forward = FxForward::new(pay_cashflow, receive_cashflow)?;
+        fx_forward
+            .mut_cashflows()
+            .for_each(|cf| cf.set_discount_curve_id(99));
+        for cf in fx_forward.pay_cashflows().iter().chain(fx_forward.receive_cashflows().iter()) {
+            assert_eq!(cf.discount_curve_id().unwrap(), 99);
+        }
+        Ok(())
+    }
 }

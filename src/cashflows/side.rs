@@ -76,3 +76,42 @@ impl Display for Side {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sign() {
+        assert_eq!(Side::Pay.sign(), -1.0);
+        assert_eq!(Side::Receive.sign(), 1.0);
+    }
+
+    #[test]
+    fn test_inverse() {
+        assert_eq!(Side::Pay.inverse(), Side::Receive);
+        assert_eq!(Side::Receive.inverse(), Side::Pay);
+    }
+
+    #[test]
+    fn test_try_from_string() {
+        assert_eq!(Side::try_from("Pay".to_string()).unwrap(), Side::Pay);
+        assert_eq!(Side::try_from("Receive".to_string()).unwrap(), Side::Receive);
+        assert!(Side::try_from("Other".to_string()).is_err());
+    }
+
+    #[test]
+    fn test_from_side_to_string() {
+        let pay_str: String = Side::Pay.into();
+        let receive_str: String = Side::Receive.into();
+        assert_eq!(pay_str, "Pay");
+        assert_eq!(receive_str, "Receive");
+    }
+
+    #[test]
+    fn test_display() {
+        assert_eq!(format!("{}", Side::Pay), "Pay");
+        assert_eq!(format!("{}", Side::Receive), "Receive");
+    }
+}

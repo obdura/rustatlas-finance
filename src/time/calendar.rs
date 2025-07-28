@@ -1,7 +1,13 @@
 use serde::Serialize;
 
 use super::calendars::{
-    brazil::Brazil, chile::Chile, nullcalendar::NullCalendar, target::TARGET, traits::{ImplCalendar, IsCalendar}, unitedstates::UnitedStates, weekendsonly::WeekendsOnly
+    brazil::Brazil,
+    chile::Chile,
+    nullcalendar::NullCalendar,
+    target::TARGET,
+    traits::{ImplCalendar, IsCalendar},
+    unitedstates::UnitedStates,
+    weekendsonly::WeekendsOnly,
 };
 use crate::{
     time::date::Date,
@@ -186,10 +192,16 @@ impl ImplCalendar for Calendar {
 
 impl IsCalendar for Calendar {}
 
-
 #[cfg(test)]
-mod tests{
-    use crate::time::{calendar::Calendar, calendars::{brazil::Brazil, chile::Chile, nullcalendar::NullCalendar, target::TARGET, traits::ImplCalendar, unitedstates::UnitedStates, weekendsonly::WeekendsOnly}};
+mod tests {
+    use crate::time::date::Date;
+    use crate::time::{
+        calendar::Calendar,
+        calendars::{
+            brazil::Brazil, chile::Chile, nullcalendar::NullCalendar, target::TARGET,
+            traits::ImplCalendar, unitedstates::UnitedStates, weekendsonly::WeekendsOnly,
+        },
+    };
 
     #[test]
     fn test_create_calendar() {
@@ -207,4 +219,46 @@ mod tests{
         assert_eq!(calendar.impl_name(), "Chile(SSE)");
     }
 
+    #[test]
+    fn test_calendar_try_from_string() {
+        let calendar = Calendar::try_from("TARGET".to_string()).unwrap();
+        assert_eq!(calendar.impl_name(), "TARGET");
+        let invalid = Calendar::try_from("InvalidCalendar".to_string());
+        assert!(invalid.is_err());
+    }
+
+    #[test]
+    fn test_calendar_from_enum_to_string() {
+        let calendar = Calendar::Chile(Chile::default());
+        let name: String = calendar.clone().into();
+        assert_eq!(name, "Chile");
+    }
+
+    #[test]
+    fn test_add_and_remove_holiday() {
+        let mut calendar = Calendar::UnitedStates(UnitedStates::default());
+        let date = Date::new(2024, 7, 4);
+        calendar.add_holiday(date);
+        assert!(calendar.added_holidays().contains(&date));
+        calendar.remove_holiday(date);
+        assert!(calendar.removed_holidays().contains(&date));
+    }
+
+    #[test]
+    fn test_business_day_and_holiday_list() {
+        let calendar = Calendar::WeekendsOnly(WeekendsOnly::new());
+        let from = Date::new(2024, 6, 1);
+        let to = Date::new(2024, 6, 10);
+        let holidays = calendar.holiday_list(from, to, true);
+        let business_days = calendar.business_day_list(from, to);
+        assert!(!holidays.is_empty());
+        assert!(!business_days.is_empty());
+    }
+
+    #[test]
+    fn test_impl_is_business_day() {
+        let calendar = Calendar::NullCalendar(NullCalendar::new());
+        let date = Date::new(2024, 1, 1);
+        assert!(calendar.impl_is_business_day(&date));
+    }
 }

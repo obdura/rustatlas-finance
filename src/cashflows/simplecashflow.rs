@@ -88,6 +88,10 @@ impl SimpleCashflow {
     pub fn set_payment_currency(&mut self, currency: Currency) {
         self.payment_currency = Some(currency);
     }
+
+    pub fn set_exchange_fixing_date(&mut self, date: Date) {
+        self.exchange_fixing_date = Some(date);
+    }
 }
 
 impl HasCurrency for SimpleCashflow {
@@ -213,6 +217,111 @@ mod tests {
         cashflow.scale(2.5)?;
 
         assert!(cashflow.amount == None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_methods_chain() -> Result<()> {
+        let date = Date::new(2022, 12, 31);
+        let currency = Currency::USD;
+        let side = Side::Pay;
+        let payment_currency = Currency::EUR;
+        let exchange_fixing_date = Date::new(2022, 12, 15);
+        let discount_curve_id = 42;
+        let id = 99;
+        let amount = 12345.67;
+
+        let cashflow = SimpleCashflow::new(date, currency, side)
+            .with_amount(amount)
+            .with_payment_currency(payment_currency)
+            .with_exchange_fixing_date(exchange_fixing_date)
+            .with_discount_curve_id(discount_curve_id)
+            .with_id(id);
+
+        assert_eq!(cashflow.payment_date(), date);
+        assert_eq!(cashflow.currency()?, currency);
+        assert_eq!(cashflow.side(), side);
+        assert_eq!(cashflow.amount()?, amount);
+        assert_eq!(cashflow.payment_currency()?, payment_currency);
+        assert_eq!(cashflow.exchange_fixing_date()?, exchange_fixing_date);
+        assert_eq!(cashflow.discount_curve_id()?, discount_curve_id);
+        assert_eq!(cashflow.id()?, id);
+        Ok(())
+    }
+
+    #[test]
+    fn test_setters() -> Result<()> {
+        let date = Date::new(2023, 1, 1);
+        let mut cashflow = SimpleCashflow::new(date, Currency::CLP, Side::Receive);
+
+        cashflow.set_amount(500.0);
+        cashflow.set_discount_curve_id(7);
+        cashflow.set_payment_currency(Currency::USD);
+        let fixing_date = Date::new(2023, 1, 2);
+        cashflow.set_exchange_fixing_date(fixing_date);
+
+        assert_eq!(cashflow.amount()?, 500.0);
+        assert_eq!(cashflow.discount_curve_id()?, 7);
+        assert_eq!(cashflow.payment_currency()?, Currency::USD);
+        assert_eq!(cashflow.exchange_fixing_date()?, fixing_date);
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_expired() {
+        let date = Date::new(2020, 5, 20);
+        let cashflow = SimpleCashflow::new(date, Currency::USD, Side::Pay);
+
+        assert!(!cashflow.is_expired(Date::new(2020, 5, 20)));
+        assert!(!cashflow.is_expired(Date::new(2020, 5, 19)));
+        assert!(cashflow.is_expired(Date::new(2020, 5, 21)));
+    }
+
+    #[test]
+    fn test_forecast_curve_id_returns_error() {
+        let date = Date::new(2021, 7, 15);
+        let cashflow = SimpleCashflow::new(date, Currency::USD, Side::Pay);
+        let result = cashflow.forecast_curve_id();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_discount_curve_id_error() {
+        let date = Date::new(2021, 7, 15);
+        let cashflow = SimpleCashflow::new(date, Currency::USD, Side::Pay);
+        let result = cashflow.discount_curve_id();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_id_error() {
+        let date = Date::new(2021, 7, 15);
+        let cashflow = SimpleCashflow::new(date, Currency::USD, Side::Pay);
+        let result = cashflow.id();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_amount_error() {
+        let date = Date::new(2021, 7, 15);
+        let cashflow = SimpleCashflow::new(date, Currency::USD, Side::Pay);
+        let result = cashflow.amount();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_payment_currency_defaults_to_currency() -> Result<()> {
+        let date = Date::new(2022, 2, 2);
+        let cashflow = SimpleCashflow::new(date, Currency::EUR, Side::Receive).with_amount(100.0);
+        assert_eq!(cashflow.payment_currency()?, Currency::EUR);
+        Ok(())
+    }
+
+    #[test]
+    fn test_exchange_fixing_date_defaults_to_payment_date() -> Result<()> {
+        let date = Date::new(2022, 2, 2);
+        let cashflow = SimpleCashflow::new(date, Currency::EUR, Side::Receive).with_amount(100.0);
+        assert_eq!(cashflow.exchange_fixing_date()?, date);
         Ok(())
     }
 }

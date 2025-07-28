@@ -28,3 +28,48 @@ impl DayCountProvider for Actual360 {
         return Actual360::day_count(start, end) as f64 / 360.0;
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_day_count_same_day() {
+        let date = Date::new(2023, 5, 15);
+        assert_eq!(Actual360::day_count(date, date), 0);
+        assert_eq!(Actual360::year_fraction(date, date), 0.0);
+    }
+
+    #[test]
+    fn test_day_count_one_day_apart() {
+        let start = Date::new(2023, 5, 15);
+        let end = Date::new(2023, 5, 16);
+        assert_eq!(Actual360::day_count(start, end), 1);
+        assert_eq!(Actual360::year_fraction(start, end), 1.0 / 360.0);
+    }
+
+    #[test]
+    fn test_day_count_leap_year() {
+        let start = Date::new(2020, 2, 28);
+        let end = Date::new(2020, 3, 1);
+        assert_eq!(Actual360::day_count(start, end), 2);
+        assert_eq!(Actual360::year_fraction(start, end), 2.0 / 360.0);
+    }
+
+    #[test]
+    fn test_day_count_across_years() {
+        let start = Date::new(2022, 12, 31);
+        let end = Date::new(2023, 1, 1);
+        assert_eq!(Actual360::day_count(start, end), 1);
+        assert_eq!(Actual360::year_fraction(start, end), 1.0 / 360.0);
+    }
+
+    #[test]
+    fn test_day_count_negative() {
+        let start = Date::new(2023, 5, 16);
+        let end = Date::new(2023, 5, 15);
+        assert_eq!(Actual360::day_count(start, end), -1);
+        assert_eq!(Actual360::year_fraction(start, end), -1.0 / 360.0);
+    }
+}

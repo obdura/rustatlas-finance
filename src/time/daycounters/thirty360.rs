@@ -87,3 +87,59 @@ impl DayCountProvider for Thirty360US {
         return Thirty360US::day_count(start, end) as f64 / 360.0;
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thirty360_basic() {
+        let start = Date::new(2020, 1, 1);
+        let end = Date::new(2020, 2, 1);
+        assert_eq!(Thirty360::day_count(start, end), 30);
+        assert_eq!(Thirty360::year_fraction(start, end), 30.0 / 360.0);
+    }
+
+    #[test]
+    fn test_thirty360_end_of_month() {
+        let start = Date::new(2020, 1, 31);
+        let end = Date::new(2020, 2, 28);
+        assert_eq!(Thirty360::day_count(start, end), 28);
+        assert_eq!(Thirty360::year_fraction(start, end), 28.0 / 360.0);
+    }
+
+    #[test]
+    fn test_thirty360_both_31st() {
+        let start = Date::new(2020, 1, 31);
+        let end = Date::new(2020, 3, 31);
+        assert_eq!(Thirty360::day_count(start, end), 60);
+        assert_eq!(Thirty360::year_fraction(start, end), 60.0 / 360.0);
+    }
+
+    #[test]
+    fn test_thirty360us_basic() {
+        let start = Date::new(2020, 1, 1);
+        let end = Date::new(2020, 2, 1);
+        assert_eq!(Thirty360US::day_count(start, end), 30);
+        assert_eq!(Thirty360US::year_fraction(start, end), 30.0 / 360.0);
+    }
+
+    #[test]
+    fn test_thirty360us_both_31st() {
+        let start = Date::new(2020, 1, 31);
+        let end = Date::new(2020, 3, 31);
+        assert_eq!(Thirty360US::day_count(start, end), 60);
+        assert_eq!(Thirty360US::year_fraction(start, end), 60.0 / 360.0);
+    }
+
+    #[test]
+    fn test_thirty360us_last_february_to_last_february() {
+        let start = Date::new(2020, 2, 29);
+        let end = Date::new(2024, 2, 29);
+        assert_eq!(Thirty360US::day_count(start, end), 1440);
+        assert_eq!(Thirty360US::year_fraction(start, end), 4.0);
+    }
+
+}

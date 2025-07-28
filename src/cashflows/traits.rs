@@ -158,4 +158,101 @@ mod tests {
 
         assert!(accrued_amount - 122.72234429 < 0.00001);
     }
+
+    #[test]
+    fn test_requires_fixing_rate_trait_defaults() {
+        struct DummyFixing {
+            start: Date,
+            end: Date,
+            fixing_rate: f64,
+        }
+        impl InterestAccrual for DummyFixing {
+            fn accrual_start_date(&self) -> Result<Date> {
+                Ok(self.start)
+            }
+            fn accrual_end_date(&self) -> Result<Date> {
+                Ok(self.end)
+            }
+            fn accrued_amount(&self, _start_date: Date, _end_date: Date) -> Result<f64> {
+                Ok(self.fixing_rate)
+            }
+            fn accrued_amount_map(&self) -> Result<BTreeMap<Date, f64>> {
+                Ok(BTreeMap::new())
+            }
+        }
+        impl RequiresFixingRate for DummyFixing {
+            fn set_fixing_rate(&mut self, fixing_rate: f64) {
+                self.fixing_rate = fixing_rate;
+            }
+        }
+
+        let mut dummy = DummyFixing {
+            start: Date::new(2023, 1, 1),
+            end: Date::new(2023, 3, 31),
+            fixing_rate: 0.0,
+        };
+        dummy.set_fixing_rate(0.07);
+        assert_eq!(dummy.fixing_start_date().unwrap(), Date::new(2023, 1, 1));
+        assert_eq!(dummy.fixing_end_date().unwrap(), Date::new(2023, 3, 31));
+        assert_eq!(dummy.accrued_amount(Date::new(2023, 1, 1), Date::new(2023, 3, 31)).unwrap(), 0.07);
+    }
+
+    #[test]
+    fn test_payable_trait() {
+        struct DummyPayable;
+        impl Payable for DummyPayable {
+            fn amount(&self) -> Result<f64> {
+                Ok(100.0)
+            }
+            fn side(&self) -> Side {
+                Side::Receive
+            }
+            fn payment_date(&self) -> Date {
+                Date::new(2024, 1, 1)
+            }
+            fn payment_currency(&self) -> Result<Currency> {
+                Ok(Currency::USD)
+            }
+            fn exchange_fixing_date(&self) -> Result<Date> {
+                Ok(Date::new(2023, 12, 31))
+            }
+        }
+
+        let dummy = DummyPayable;
+        assert_eq!(dummy.amount().unwrap(), 100.0);
+        assert_eq!(dummy.side(), Side::Receive);
+        assert_eq!(dummy.payment_date(), Date::new(2024, 1, 1));
+        assert_eq!(dummy.payment_currency().unwrap(), Currency::USD);
+        assert_eq!(dummy.exchange_fixing_date().unwrap(), Date::new(2023, 12, 31));
+    }
+
+    #[test]
+    fn test_expires_trait() {
+        struct DummyExpires(Date);
+        impl Expires for DummyExpires {
+            fn is_expired(&self, date: Date) -> bool {
+                date > self.0
+            }
+        }
+        let dummy = DummyExpires(Date::new(2023, 6, 30));
+        assert!(!dummy.is_expired(Date::new(2023, 6, 30)));
+        assert!(dummy.is_expired(Date::new(2023, 7, 1)));
+    }
+
+    #[test]
+    fn test_scalable_trait() {
+        struct DummyScalable {
+            value: f64,
+        }
+        impl Scalable for DummyScalable {
+            fn scale(&mut self, factor: f64) -> Result<()> {
+                self.value *= factor;
+                Ok(())
+            }
+        }
+        let mut dummy = DummyScalable { value: 10.0 };
+        dummy.scale(2.5).unwrap();
+        assert!((dummy.value - 25.0).abs() < 1e-8);
+    }
+
 }

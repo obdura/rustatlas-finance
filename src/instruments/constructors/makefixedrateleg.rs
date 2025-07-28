@@ -262,6 +262,7 @@ impl MakeFixedRateLeg {
     pub fn build(self) -> Result<Leg> {
         let mut cashflows = Vec::new();
 
+        // Validate required fields
         let notional = self
             .notional
             .ok_or(AtlasError::ValueNotSetErr("Notional".into()))?;
@@ -274,6 +275,7 @@ impl MakeFixedRateLeg {
             .currency
             .ok_or(AtlasError::ValueNotSetErr("Currency".into()))?;
 
+        // If no calendar is set, use NullCalendar
         let calendar = self
             .calendar
             .unwrap_or(Calendar::NullCalendar(NullCalendar::new()));
@@ -293,7 +295,7 @@ impl MakeFixedRateLeg {
                     Some(settlement_period) => calendar.advance(
                         date,
                         settlement_period,
-                        Some(BusinessDayConvention::Following),
+                        Some(BusinessDayConvention::Following), // Adjusts the date to the next business day if necessary
                         false,
                     ),
                     None => date,
@@ -312,9 +314,12 @@ impl MakeFixedRateLeg {
             }
         };
 
+        // If no business day convention is set, use Unadjusted
         let business_day_convention = self
             .business_day_convention
             .unwrap_or(BusinessDayConvention::Unadjusted);
+
+        // If no date generation rule is set, use Backward
         let date_generation_rule = self
             .date_generation_rule
             .unwrap_or(DateGenerationRule::Backward);
@@ -331,7 +336,6 @@ impl MakeFixedRateLeg {
                         .with_rule(date_generation_rule);
 
                 let fixing_schedule = schedule_builder.build()?;
-
                 let fixings_dates = fixing_schedule.dates();
 
                 let payment_dates = match self.payment_lag {
@@ -450,18 +454,14 @@ mod tests{
 
     use super::MakeFixedRateLeg;
     use crate::{
-        cashflows::{side::Side, traits::Payable},
-        currencies::enums::Currency,
-        rates::{enums::Compounding, interestrate::{InterestRate, RateDefinition}},
-        time::{
+        cashflows::{side::Side, traits::Payable}, currencies::enums::Currency, rates::{enums::Compounding, interestrate::{InterestRate, RateDefinition}}, time::{
             calendar::Calendar,
-            calendars::chile::Chile,
+            calendars::{chile::Chile, unitedstates::{UnitedStates, UnitedStatesMarket}},
             date::Date,
             daycounter::DayCounter,
             enums::{BusinessDayConvention, DateGenerationRule, Frequency, TimeUnit},
             period::Period,
-        },
-        visitors::traits::HasCashflows,
+        }, visitors::traits::HasCashflows
     };
 
     #[test]
@@ -631,4 +631,106 @@ mod tests{
 
         assert!(fix_leg.cashflows_as_vec().len() == 2);
     }   
+
+    #[test]
+    fn test_payment_date_in_make_fixed_rate_leg_with_sofr_calendar() {
+        let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
+        let start_date = Date::new(2025, 7, 25);
+        let end_date = start_date + Period::new(10, TimeUnit::Years);
+        let rate_definition = RateDefinition::new(
+            DayCounter::Thirty360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+
+
+        let rate = InterestRate::from_rate_definition(0.5, rate_definition);
+        let notional = 1_000_000.0;
+
+        let fix_leg = MakeFixedRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_notional(notional)
+            .with_rate(rate)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(0))
+            .with_payment_frequency(Frequency::Annual)
+            .with_calendar(Some(cal))
+            .with_business_day_convention(Some(BusinessDayConvention::ModifiedFollowing))
+            .bullet()
+            .with_final_flow(false)
+            .build()
+            .unwrap();
+
+        let expected_payment_day = vec![
+            Date::new(2025, 7, 25),
+            Date::new(2026, 7, 27),
+            Date::new(2027, 7, 26),
+            Date::new(2028, 7, 25),
+            Date::new(2029, 7, 25),
+            Date::new(2030, 7, 25),
+            Date::new(2031, 7, 25),
+            Date::new(2032, 7, 26),
+            Date::new(2033, 7, 25),
+            Date::new(2034, 7, 25),
+            Date::new(2035, 7, 25),
+        ];
+
+        fix_leg.cashflows().for_each(|cf| {
+            assert!(expected_payment_day.contains(&cf.payment_date()));
+        });
+    }
+
+    #[test]
+    fn test_payment_date_in_make_fixed_rate_leg_with_sofr_calendar_and_settlement_period() {
+        let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
+        let start_date = Date::new(2025, 7, 23);
+        let tenor = Period::new(10, TimeUnit::Years);
+        let set_period = Period::new(2, TimeUnit::Days);
+        let rate_definition = RateDefinition::new(
+            DayCounter::Thirty360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+
+
+        let rate = InterestRate::from_rate_definition(0.5, rate_definition);
+        let notional = 1_000_000.0;
+
+        let fix_leg = MakeFixedRateLeg::new()
+            .with_negotiation_date(start_date)
+            .with_settlement_period(set_period)
+            .with_tenor(tenor)
+            .with_notional(notional)
+            .with_rate(rate)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(0))
+            .with_payment_frequency(Frequency::Annual)
+            .with_calendar(Some(cal))
+            .with_business_day_convention(Some(BusinessDayConvention::ModifiedFollowing))
+            .bullet()
+            .with_final_flow(false)
+            .build()
+            .unwrap();
+
+        let expected_payment_day = vec![
+            Date::new(2025, 7, 25),
+            Date::new(2026, 7, 27),
+            Date::new(2027, 7, 26),
+            Date::new(2028, 7, 25),
+            Date::new(2029, 7, 25),
+            Date::new(2030, 7, 25),
+            Date::new(2031, 7, 25),
+            Date::new(2032, 7, 26),
+            Date::new(2033, 7, 25),
+            Date::new(2034, 7, 25),
+            Date::new(2035, 7, 25),
+        ];
+
+        fix_leg.cashflows().for_each(|cf| {
+            assert!(expected_payment_day.contains(&cf.payment_date()));
+        });
+    }
 }

@@ -571,6 +571,72 @@ mod tests {
         assert!(new_date == Date::new(2040, 1, 31));
     }
 
+    #[test]
+    fn test_weekend_is_not_business_day() {
+        let cal = Chile::new(ChileMarket::SSE);
+        // Saturday
+        assert_eq!(cal.is_business_day(&Date::new(2024, 6, 22)), false);
+        // Sunday
+        assert_eq!(cal.is_business_day(&Date::new(2024, 6, 23)), false);
+        // Monday (should be business day unless holiday)
+        assert_eq!(cal.is_business_day(&Date::new(2024, 6, 24)), true);
+    }
+
+    #[test]
+    fn test_non_holiday_is_business_day() {
+        let cal = Chile::new(ChileMarket::SSE);
+        // Random weekday not a holiday
+        assert_eq!(cal.is_business_day(&Date::new(2024, 3, 12)), true);
+    }
+
+    #[test]
+    fn test_holiday_list_includes_holidays() {
+        let cal = Chile::new(ChileMarket::SSE);
+        let from = Date::new(2024, 12, 24);
+        let to = Date::new(2024, 12, 26);
+        let holidays = cal.holiday_list(from, to, false);
+        assert!(holidays.contains(&Date::new(2024, 12, 25)));
+    }
+
+    #[test]
+    fn test_business_day_list_excludes_holidays() {
+        let cal = Chile::new(ChileMarket::SSE);
+        let from = Date::new(2024, 12, 24);
+        let to = Date::new(2024, 12, 26);
+        let business_days = cal.business_day_list(from, to);
+        assert!(!business_days.contains(&Date::new(2024, 12, 25)));
+        assert!(business_days.contains(&Date::new(2024, 12, 24)));
+        assert!(business_days.contains(&Date::new(2024, 12, 26)));
+    }
+
+    #[test]
+    fn test_bank_holiday() {
+        let cal = Chile::new(ChileMarket::SSE);
+        assert_eq!(cal.is_business_day(&Date::new(2024, 12, 31)), false);
+    }
+
+    #[test]
+    fn test_christmas_day() {
+        let cal = Chile::new(ChileMarket::SSE);
+        assert_eq!(cal.is_business_day(&Date::new(2024, 12, 25)), false);
+    }
+
+    #[test]
+    fn test_new_years_day() {
+        let cal = Chile::new(ChileMarket::SSE);
+        assert_eq!(cal.is_business_day(&Date::new(2024, 1, 1)), false);
+    }
+
+    #[test]
+    fn test_independence_day_variants() {
+        let cal = Chile::new(ChileMarket::SSE);
+        // 18th September is always holiday
+        assert_eq!(cal.is_business_day(&Date::new(2024, 9, 18)), false);
+        // 17th September holiday in 2012 (Monday)
+        assert_eq!(cal.is_business_day(&Date::new(2012, 9, 17)), false);
+        // 16th September holiday in 2022
+        assert_eq!(cal.is_business_day(&Date::new(2022, 9, 16)), false);
+    }
 }
 
 

@@ -237,6 +237,7 @@ impl MakeFloatingRateLeg {
             .rate_definition
             .ok_or(AtlasError::ValueNotSetErr("Rate definition".into()))?;
 
+        // Default spread to 0.0 if not set
         let spread = self.spread.unwrap_or(0.0);
 
         let payment_frequency = self
@@ -249,6 +250,7 @@ impl MakeFloatingRateLeg {
             .currency
             .ok_or(AtlasError::ValueNotSetErr("Currency".into()))?;
 
+        // Default calendar to NullCalendar if not set
         let calendar = self
             .calendar
             .unwrap_or(Calendar::NullCalendar(NullCalendar::new()));
@@ -279,6 +281,7 @@ impl MakeFloatingRateLeg {
             }
         };
 
+        // Default business day convention to Unadjusted if not set
         let business_day_convention = self
             .business_day_convention
             .unwrap_or(BusinessDayConvention::Unadjusted);
@@ -317,7 +320,6 @@ impl MakeFloatingRateLeg {
                 let notionals =
                     notionals_vector(fixings_dates.len() - 1, notional, Structure::Bullet);
 
-
                 if self.initial_flow {
                     add_cashflows_to_vec(
                         &mut cashflows,
@@ -351,7 +353,6 @@ impl MakeFloatingRateLeg {
                     side,
                     currency,
                 );
-
 
                 match self.discount_curve_id {
                     Some(id) => cashflows.iter_mut().for_each(|cf| {
@@ -424,7 +425,7 @@ fn build_coupons_from_notionals(
 }
 
 #[cfg(test)]
-mod tests{
+mod tests {
     use crate::{
         cashflows::{
             cashflow::Cashflow,
@@ -435,10 +436,7 @@ mod tests{
         instruments::constructors::makefloatingrateleg::MakeFloatingRateLeg,
         rates::{enums::Compounding, interestrate::RateDefinition},
         time::{
-            date::Date,
-            daycounter::DayCounter,
-            enums::{Frequency, TimeUnit},
-            period::Period,
+            calendar::Calendar, calendars::unitedstates::{UnitedStates, UnitedStatesMarket}, date::Date, daycounter::DayCounter, enums::{BusinessDayConvention, Frequency, TimeUnit}, period::Period
         },
         visitors::traits::HasCashflows,
     };
@@ -533,5 +531,106 @@ mod tests{
                 _ => (),
             };
         }
+    }
+
+    #[test]
+    fn test_payment_date_in_make_floating_rate_leg_with_sofr_calendar() {
+        let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
+        let start_date = Date::new(2025, 7, 25);
+        let end_date = start_date + Period::new(10, TimeUnit::Years);
+        let rate_definition = RateDefinition::new(
+            DayCounter::Thirty360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+
+
+        let notional = 1_000_000.0;
+
+        let fix_leg = MakeFloatingRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_notional(notional)
+            .with_side(Side::Receive)
+            .with_rate_definition(rate_definition)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(0))
+            .with_payment_frequency(Frequency::Annual)
+            .with_calendar(Some(cal))
+            .with_business_day_convention(Some(BusinessDayConvention::ModifiedFollowing))
+            .bullet()
+            .with_final_flow(false)
+            .build()
+            .unwrap();
+
+        let expected_payment_day = vec![
+            Date::new(2025, 7, 25),
+            Date::new(2026, 7, 27),
+            Date::new(2027, 7, 26),
+            Date::new(2028, 7, 25),
+            Date::new(2029, 7, 25),
+            Date::new(2030, 7, 25),
+            Date::new(2031, 7, 25),
+            Date::new(2032, 7, 26),
+            Date::new(2033, 7, 25),
+            Date::new(2034, 7, 25),
+            Date::new(2035, 7, 25),
+        ];
+
+        fix_leg.cashflows().for_each(|cf| {
+            assert!(expected_payment_day.contains(&cf.payment_date()));
+        });
+    }
+
+
+
+    #[test]
+    fn test_payment_date_in_make_floating_rate_leg_with_sofr_calendar_and_settlement_period() {
+        let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
+        let start_date = Date::new(2025, 7, 23);
+        let tenor = Period::new(10, TimeUnit::Years);
+        let set_period = Period::new(2, TimeUnit::Days);
+        let rate_definition = RateDefinition::new(
+            DayCounter::Thirty360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+
+        let notional = 1_000_000.0;
+
+        let fix_leg = MakeFloatingRateLeg::new()
+            .with_negotiation_date(start_date)
+            .with_settlement_period(set_period)
+            .with_tenor(tenor)
+            .with_notional(notional)
+            .with_rate_definition(rate_definition)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(0))
+            .with_payment_frequency(Frequency::Annual)
+            .with_calendar(Some(cal))
+            .with_business_day_convention(Some(BusinessDayConvention::ModifiedFollowing))
+            .bullet()
+            .with_final_flow(false)
+            .build()
+            .unwrap();
+
+        let expected_payment_day = vec![
+            Date::new(2025, 7, 25),
+            Date::new(2026, 7, 27),
+            Date::new(2027, 7, 26),
+            Date::new(2028, 7, 25),
+            Date::new(2029, 7, 25),
+            Date::new(2030, 7, 25),
+            Date::new(2031, 7, 25),
+            Date::new(2032, 7, 26),
+            Date::new(2033, 7, 25),
+            Date::new(2034, 7, 25),
+            Date::new(2035, 7, 25),
+        ];
+
+        fix_leg.cashflows().for_each(|cf| {
+            assert!(expected_payment_day.contains(&cf.payment_date()));
+        });
     }
 }

@@ -672,10 +672,7 @@ fn previous_twentieth(date: Date, rule: DateGenerationRule) -> Date {
 mod tests {
     use std::vec;
 
-    use crate::{
-        prelude::{UnitedStates, UnitedStatesMarket},
-        time::calendars::target::TARGET,
-    };
+    use crate::time::calendars::{target::TARGET, unitedstates::{UnitedStates, UnitedStatesMarket}};
 
     use super::*;
 
@@ -1143,5 +1140,112 @@ mod tests {
         expected.iter().for_each(|d| {
             assert!(dates.contains(d));
         });
+    }
+
+    #[test]
+    fn test_make_schedule_negative_tenor() {
+        let from = Date::new(2022, 1, 1);
+        let to = Date::new(2022, 3, 1);
+        let tenor = Period::new(-1, TimeUnit::Months);
+        let result = MakeSchedule::new(from, to).with_tenor(tenor).build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_make_schedule_first_date_out_of_range() {
+        let from = Date::new(2022, 1, 1);
+        let to = Date::new(2022, 3, 1);
+        let tenor = Period::new(1, TimeUnit::Months);
+        let first_date = Date::new(2021, 12, 31);
+        let result = MakeSchedule::new(from, to)
+            .with_tenor(tenor)
+            .with_first_date(first_date)
+            .build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_make_schedule_next_to_last_date_out_of_range() {
+        let from = Date::new(2022, 1, 1);
+        let to = Date::new(2022, 3, 1);
+        let tenor = Period::new(1, TimeUnit::Months);
+        let next_to_last_date = Date::new(2022, 3, 1);
+        let result = MakeSchedule::new(from, to)
+            .with_tenor(tenor)
+            .with_next_to_last_date(next_to_last_date)
+            .build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_make_schedule_third_wednesday_rule() {
+        let from = Date::new(2022, 1, 1);
+        let to = Date::new(2022, 7, 1);
+        let tenor = Period::new(1, TimeUnit::Months);
+        let schedule = MakeSchedule::new(from, to)
+            .with_tenor(tenor)
+            .with_rule(DateGenerationRule::ThirdWednesday)
+            .build()
+            .unwrap();
+        // All dates except first and last should be third Wednesdays
+        for date in &schedule.dates()[1..schedule.dates().len()-1] {
+            assert_eq!(date.weekday(), Weekday::Wednesday);
+            assert!(date.day() >= 15 && date.day() <= 21);
+        }
+    }
+
+    #[test]
+    fn test_make_schedule_end_of_month_false() {
+        let from = Date::new(2022, 1, 31);
+        let to = Date::new(2022, 4, 30);
+        let tenor = Period::new(1, TimeUnit::Months);
+        let schedule = MakeSchedule::new(from, to)
+            .with_tenor(tenor)
+            .end_of_month(true)
+            .build()
+            .unwrap();
+        assert_eq!(schedule.dates()[1], Date::new(2022, 2, 28));
+        assert_eq!(schedule.dates()[2], Date::new(2022, 3, 31));
+        assert_eq!(schedule.dates()[3], Date::new(2022, 4, 30));
+    }
+
+    #[test]
+    fn test_make_schedule_with_custom_calendar() {
+        let from = Date::new(2022, 1, 1);
+        let to = Date::new(2022, 1, 10);
+        let tenor = Period::new(1, TimeUnit::Days);
+        let calendar = Calendar::TARGET(TARGET::new());
+        let schedule = MakeSchedule::new(from, to)
+            .with_tenor(tenor)
+            .with_calendar(calendar)
+            .with_convention(BusinessDayConvention::ModifiedFollowing)
+            .build()
+            .unwrap();
+        // Should skip weekends (TARGET calendar)
+        let dates = schedule.dates();
+        
+        for date in dates {
+            assert!(date.weekday() != Weekday::Saturday && date.weekday() != Weekday::Sunday);
+        }
+    }
+
+    #[test]
+    fn test_make_schedule_with_first_and_next_to_last_date() {
+        let from = Date::new(2022, 1, 1);
+        let to = Date::new(2022, 6, 1);
+        let tenor = Period::new(1, TimeUnit::Months);
+        let first_date = Date::new(2022, 2, 1);
+        let next_to_last_date = Date::new(2022, 5, 1);
+        let schedule = MakeSchedule::new(from, to)
+            .with_tenor(tenor)
+            .with_first_date(first_date)
+            .with_next_to_last_date(next_to_last_date)
+            .build()
+            .unwrap();
+        let dates = schedule.dates();
+        assert_eq!(dates[0], from);
+        assert_eq!(dates[1], first_date);
+        assert_eq!(dates[dates.len()-2], next_to_last_date);
+        assert_eq!(dates[dates.len()-1], to);
     }
 }

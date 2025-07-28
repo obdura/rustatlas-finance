@@ -552,3 +552,238 @@ impl CurrencyDetails for DKK {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_usd_details() {
+        let usd = USD;
+        assert_eq!(usd.code(), "USD");
+        assert_eq!(usd.name(), "US Dollar");
+        assert_eq!(usd.symbol(), "$");
+        assert_eq!(usd.precision(), 2);
+        assert_eq!(usd.numeric_code(), 840);
+    }
+
+    #[test]
+    fn test_eur_details() {
+        let eur = EUR;
+        assert_eq!(eur.code(), "EUR");
+        assert_eq!(eur.name(), "Euro");
+        assert_eq!(eur.symbol(), "€");
+        assert_eq!(eur.precision(), 2);
+        assert_eq!(eur.numeric_code(), 978);
+    }
+
+    #[test]
+    fn test_jpy_details() {
+        let jpy = JPY;
+        assert_eq!(jpy.code(), "JPY");
+        assert_eq!(jpy.name(), "Japanese Yen");
+        assert_eq!(jpy.symbol(), "¥");
+        assert_eq!(jpy.precision(), 0);
+        assert_eq!(jpy.numeric_code(), 392);
+    }
+
+    #[test]
+    fn test_clp_details() {
+        let clp = CLP;
+        assert_eq!(clp.code(), "CLP");
+        assert_eq!(clp.name(), "Chilean Peso");
+        assert_eq!(clp.symbol(), "$");
+        assert_eq!(clp.precision(), 0);
+        assert_eq!(clp.numeric_code(), 152);
+    }
+
+    #[test]
+    fn test_cny_details() {
+        let cny = CNY;
+        assert_eq!(cny.code(), "CNY");
+        assert_eq!(cny.name(), "Chinese Yuan");
+        assert_eq!(cny.symbol(), "¥");
+        assert_eq!(cny.precision(), 2);
+        assert_eq!(cny.numeric_code(), 156);
+    }
+
+    #[test]
+    fn test_inr_details() {
+        let inr = INR;
+        assert_eq!(inr.code(), "INR");
+        assert_eq!(inr.name(), "Indian Rupee");
+        assert_eq!(inr.symbol(), "₹");
+        assert_eq!(inr.precision(), 2);
+        assert_eq!(inr.numeric_code(), 356);
+    }
+
+    #[test]
+    fn test_nzd_details() {
+        let nzd = NZD;
+        assert_eq!(nzd.code(), "NZD");
+        assert_eq!(nzd.name(), "New Zealand Dollar");
+        assert_eq!(nzd.symbol(), "NZ$");
+        assert_eq!(nzd.precision(), 2);
+        assert_eq!(nzd.numeric_code(), 554);
+    }
+
+    #[test]
+    fn test_cnh_details() {
+        let cnh = CNH;
+        assert_eq!(cnh.code(), "CNH");
+        assert_eq!(cnh.name(), "Chinese Yuan (offshore)");
+        assert_eq!(cnh.symbol(), "¥");
+        assert_eq!(cnh.precision(), 2);
+        assert_eq!(cnh.numeric_code(), 156);
+    }
+
+    #[test]
+    fn test_hkd_details() {
+        let hkd = HKD;
+        assert_eq!(hkd.code(), "HKD");
+        assert_eq!(hkd.name(), "Hong Kong Dollar");
+        assert_eq!(hkd.symbol(), "HK$");
+        assert_eq!(hkd.precision(), 2);
+        assert_eq!(hkd.numeric_code(), 344);
+    }
+
+    #[test]
+    fn test_idr_details() {
+        let idr = IDR;
+        assert_eq!(idr.code(), "IDR");
+        assert_eq!(idr.name(), "Indonesian Rupiah");
+        assert_eq!(idr.symbol(), "Rp");
+        assert_eq!(idr.precision(), 2);
+        assert_eq!(idr.numeric_code(), 360);
+    }
+
+    #[test]
+    fn test_zar_details() {
+        let zar = ZAR;
+        assert_eq!(zar.code(), "ZAR");
+        assert_eq!(zar.name(), "South African Rand");
+        assert_eq!(zar.symbol(), "R");
+        assert_eq!(zar.precision(), 2);
+        assert_eq!(zar.numeric_code(), 710);
+    }
+
+    #[test]
+    fn test_clf_details() {
+        let clf = CLF;
+        assert_eq!(clf.code(), "CLF");
+        assert_eq!(clf.name(), "Chilean Unidad de Fomento");
+        assert_eq!(clf.symbol(), "UF");
+        assert_eq!(clf.precision(), 4);
+        assert_eq!(clf.numeric_code(), 990);
+    }
+
+    #[test]
+    fn test_chf_details() {
+        let chf = CHF;
+        assert_eq!(chf.code(), "CHF");
+        assert_eq!(chf.name(), "Swiss Franc");
+        assert_eq!(chf.symbol(), "Fr");
+        assert_eq!(chf.precision(), 2);
+        assert_eq!(chf.numeric_code(), 756);
+    }
+
+    #[test]
+    fn test_brl_details() {
+        let brl = BRL;
+        assert_eq!(brl.code(), "BRL");
+        assert_eq!(brl.name(), "Brazilian Real");
+        assert_eq!(brl.symbol(), "R$");
+        assert_eq!(brl.precision(), 2);
+        assert_eq!(brl.numeric_code(), 986);
+    }
+
+    #[test]
+    fn test_cop_details() {
+        let cop = COP;
+        assert_eq!(cop.code(), "COP");
+        assert_eq!(cop.name(), "Colombian Peso");
+        assert_eq!(cop.symbol(), "$");
+        assert_eq!(cop.precision(), 2);
+        assert_eq!(cop.numeric_code(), 170);
+    }
+
+    #[test]
+    fn test_aud_details() {
+        let aud = AUD;
+        assert_eq!(aud.code(), "AUD");
+        assert_eq!(aud.name(), "Australian Dollar");
+        assert_eq!(aud.symbol(), "A$");
+        assert_eq!(aud.precision(), 2);
+        assert_eq!(aud.numeric_code(), 36);
+    }
+
+    #[test]
+    fn test_cad_details() {
+        let cad = CAD;
+        assert_eq!(cad.code(), "CAD");
+        assert_eq!(cad.name(), "Canadian Dollar");
+        assert_eq!(cad.symbol(), "Can$");
+        assert_eq!(cad.precision(), 2);
+        assert_eq!(cad.numeric_code(), 124);
+    }
+
+    #[test]
+    fn test_mxn_details() {
+        let mxn = MXN;
+        assert_eq!(mxn.code(), "MXN");
+        assert_eq!(mxn.name(), "Mexican Peso");
+        assert_eq!(mxn.symbol(), "Mex$");
+        assert_eq!(mxn.precision(), 2);
+        assert_eq!(mxn.numeric_code(), 484);
+    }
+
+    #[test]
+    fn test_pen_details() {
+        let pen = PEN;
+        assert_eq!(pen.code(), "PEN");
+        assert_eq!(pen.name(), "Peruvian Sol");
+        assert_eq!(pen.symbol(), "S/.");
+        assert_eq!(pen.precision(), 2);
+        assert_eq!(pen.numeric_code(), 604);
+    }
+
+    #[test]
+    fn test_gbp_details() {
+        let gbp = GBP;
+        assert_eq!(gbp.code(), "GBP");
+        assert_eq!(gbp.name(), "British Pound");
+        assert_eq!(gbp.symbol(), "£");
+        assert_eq!(gbp.precision(), 2);
+        assert_eq!(gbp.numeric_code(), 826);
+    }
+
+    #[test]
+    fn test_nok_details() {
+        let nok = NOK;
+        assert_eq!(nok.code(), "NOK");
+        assert_eq!(nok.name(), "Norwegian Krone");
+        assert_eq!(nok.symbol(), "kr");
+        assert_eq!(nok.precision(), 2);
+        assert_eq!(nok.numeric_code(), 578);
+    }
+
+    #[test]
+    fn test_sek_details() {
+        let sek = SEK;
+        assert_eq!(sek.code(), "SEK");
+        assert_eq!(sek.name(), "Swedish Krona");
+        assert_eq!(sek.symbol(), "kr");
+        assert_eq!(sek.precision(), 2);
+        assert_eq!(sek.numeric_code(), 752);
+    }
+
+    #[test]
+    fn test_dkk_details() {
+        let dkk = DKK;
+        assert_eq!(dkk.code(), "DKK");
+        assert_eq!(dkk.name(), "Danish Krone");
+        assert_eq!(dkk.symbol(), "kr");
+        assert_eq!(dkk.precision(), 2);
+        assert_eq!(dkk.numeric_code(), 208);
+    }
+}

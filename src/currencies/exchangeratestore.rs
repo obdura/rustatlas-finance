@@ -210,4 +210,64 @@ mod tests {
             1.0 / (1.1 * 800.0)
         );
     }
+
+    #[test]
+    fn test_reverse_rate_caching() {
+        let ref_date = Date::new(2021, 1, 1);
+        let mut manager = ExchangeRateStore::new(ref_date);
+        manager.add_exchange_rate(USD, EUR, 0.8);
+
+        // First call should cache both (USD, EUR) and (EUR, USD)
+        let rate = manager.get_exchange_rate(USD, EUR).unwrap();
+        assert_eq!(rate, 0.8);
+
+        let reverse_rate = manager.get_exchange_rate(EUR, USD).unwrap();
+        assert!((reverse_rate - 1.25).abs() < 1e-10);
+
+        // Both should be cached
+        let cache = manager.exchange_rate_cache.lock().unwrap();
+        assert_eq!(cache.get(&(USD, EUR)).unwrap(), &0.8);
+        assert!((cache.get(&(EUR, USD)).unwrap() - 1.25).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_indirect_path() {
+        let ref_date = Date::new(2021, 1, 1);
+        let mut manager = ExchangeRateStore::new(ref_date);
+        manager.add_exchange_rate(USD, EUR, 0.9);
+        manager.add_exchange_rate(EUR, CLP, 900.0);
+
+        // USD -> EUR -> CLP
+        let rate = manager.get_exchange_rate(USD, CLP).unwrap();
+        assert!((rate - (0.9 * 900.0)).abs() < 1e-10);
+
+        // CLP -> USD (reverse path)
+        let reverse_rate = manager.get_exchange_rate(CLP, USD).unwrap();
+        assert!((reverse_rate - 1.0 / (0.9 * 900.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_add_exchange_rate_overwrites() {
+        let ref_date = Date::new(2021, 1, 1);
+        let mut manager = ExchangeRateStore::new(ref_date);
+        manager.add_exchange_rate(USD, EUR, 0.8);
+        manager.add_exchange_rate(USD, EUR, 0.9);
+
+        let rate = manager.get_exchange_rate(USD, EUR).unwrap();
+        assert_eq!(rate, 0.9);
+    }
+
+    #[test]
+    fn test_get_exchange_rate_map_returns_clone() {
+        let ref_date = Date::new(2021, 1, 1);
+        let mut manager = ExchangeRateStore::new(ref_date);
+        manager.add_exchange_rate(USD, EUR, 0.8);
+
+        let map = manager.get_exchange_rate_map();
+        assert_eq!(map.get(&(USD, EUR)), Some(&0.8));
+        // Changing the returned map does not affect the original
+        let mut map2 = map.clone();
+        map2.insert((USD, EUR), 0.5);
+        assert_eq!(manager.get_exchange_rate(USD, EUR).unwrap(), 0.8);
+    }
 }
