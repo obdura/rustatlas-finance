@@ -49,6 +49,7 @@ pub struct MakeFloatingRateLeg {
 
     calendar: Option<Calendar>,
     business_day_convention: Option<BusinessDayConvention>,
+    termination_business_day_convention: Option<BusinessDayConvention>,
     date_generation_rule: Option<DateGenerationRule>,
 
     initial_flow: bool,
@@ -76,6 +77,7 @@ impl MakeFloatingRateLeg {
             forecast_curve_id: None,
             calendar: None,
             business_day_convention: None,
+            termination_business_day_convention: None,
             date_generation_rule: None,
 
             initial_flow: false,
@@ -93,6 +95,14 @@ impl MakeFloatingRateLeg {
         business_day_convention: Option<BusinessDayConvention>,
     ) -> MakeFloatingRateLeg {
         self.business_day_convention = business_day_convention;
+        self
+    }
+
+    pub fn with_termination_business_day_convention(
+        mut self,
+        termination_business_day_convention: Option<BusinessDayConvention>,
+    ) -> MakeFloatingRateLeg {
+        self.termination_business_day_convention = termination_business_day_convention;
         self
     }
 
@@ -285,6 +295,12 @@ impl MakeFloatingRateLeg {
         let business_day_convention = self
             .business_day_convention
             .unwrap_or(BusinessDayConvention::Unadjusted);
+
+        // Default termination business day convention to the same as business day convention
+        let termination_business_day_convention = self
+            .termination_business_day_convention
+            .unwrap_or(business_day_convention);
+
         let date_generation_rule = self
             .date_generation_rule
             .unwrap_or(DateGenerationRule::Backward);
@@ -297,12 +313,15 @@ impl MakeFloatingRateLeg {
                         .with_frequency(payment_frequency)
                         .with_calendar(calendar.clone())
                         .with_convention(business_day_convention)
-                        .with_termination_date_convention(business_day_convention)
+                        .with_termination_date_convention(termination_business_day_convention)
                         .with_rule(date_generation_rule);
 
                 let fixing_schedule = schedule_builder.build()?;
-
                 let fixings_dates = fixing_schedule.dates();
+
+                let maturity_date = fixings_dates.last().ok_or(
+                    AtlasError::ValueNotSetErr("Fixing schedule should have at least one date".into()),
+                )?;
 
                 let payment_dates = match self.payment_lag {
                     Some(lag) => fixings_dates
@@ -370,7 +389,7 @@ impl MakeFloatingRateLeg {
                 Ok(Leg::new(
                     self.negotiation_date,
                     adjusted_start_date,
-                    adjusted_end_date,
+                    *maturity_date,
                     notional,
                     payment_frequency,
                     structure,
