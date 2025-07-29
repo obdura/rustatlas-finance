@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::{
     cashflows::traits::Payable,
     core::{
@@ -52,47 +50,56 @@ impl<'a> NPVConstVisitor<'a> {
     }
 
     fn visit_cashflows(&self, visitable: &dyn HasCashflows) -> Result<f64> {
-        let mut currencies = HashSet::new();
-        for cf in visitable.cashflows() {
-            currencies.insert(cf.payment_currency()?);
-        }
-
         let mut in_local_currency = self.in_local_currency;
-        if !in_local_currency && currencies.len() > 1 {
-            in_local_currency = true;
+        // First loop: check if cashflows are in local currency
+        if !in_local_currency {
+            let mut first_currency = None;
+            let mut multi_currency = false;
+            for cf in visitable.cashflows() {
+                let currency = cf.payment_currency()?;
+                if let Some(cur) = first_currency {
+                    if cur != currency {
+                        multi_currency = true;
+                        break;
+                    }
+                } else {
+                    first_currency = Some(currency);
+                }
+            }
+            if multi_currency {
+                in_local_currency = true;
+            }
         }
 
-        let npv = visitable.cashflows().try_fold(0.0, |acc, cf| {
+        let mut npv = 0.0;
+        // Second loop: calculate NPV
+        for cf in visitable.cashflows() {
             let id = cf.id()?;
-            let cf_market_data =
-                self.market_data
-                    .get(id)
-                    .ok_or(AtlasError::NotFoundErr(format!(
-                        "Market data for cashflow with id {}",
-                        id
-                    )))?;
+            let cf_market_data = self.market_data.get(id).ok_or(AtlasError::NotFoundErr(format!(
+                "Market data for cashflow with id {}",
+                id
+            )))?;
 
-            if cf_market_data.reference_date() == cf.payment_date() && !self.include_today_cashflows
+            if (cf_market_data.reference_date() == cf.payment_date() && !self.include_today_cashflows)
                 || cf.payment_date() < cf_market_data.reference_date()
             {
-                return Ok(acc);
+                continue;
             }
 
             let df = cf_market_data.df()?;
             let flag = cf.side().sign();
-            let fx = cf_market_data.fx()?;
             let fx_fwd = cf_market_data.fx_fwd()?;
             let amount = cf.amount()?;
 
-            let npv = if in_local_currency {
+            npv += if in_local_currency {
+                let fx = cf_market_data.fx()?;
                 amount * fx_fwd * df * flag / fx
             } else {
                 amount * fx_fwd * df * flag
             };
+        }
 
-            Ok(acc + npv)
-        });
-        npv
+        Ok(npv)
     }
 }
 
