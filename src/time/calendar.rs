@@ -23,6 +23,9 @@ use std::collections::HashSet;
 /// * `WeekendsOnly` - A calendar that considers only weekends as business days.
 /// * `TARGET` - A calendar that considers only TARGET business days as business days.
 /// * `UnitedStates` - A calendar for the United States.
+/// * `Brazil` - A calendar for Brazil.
+/// * `Chile` - A calendar for Chile.
+/// * `Composite` - A composite calendar that combines multiple calendars.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Calendar {
     NullCalendar(NullCalendar),
@@ -31,6 +34,7 @@ pub enum Calendar {
     UnitedStates(UnitedStates),
     Brazil(Brazil),
     Chile(Chile),
+    Composite(Box<Calendar>, Box<Calendar>),
 }
 
 impl Serialize for Calendar {
@@ -45,6 +49,9 @@ impl Serialize for Calendar {
             Calendar::UnitedStates(cal) => cal.impl_name(),
             Calendar::Brazil(cal) => cal.impl_name(),
             Calendar::Chile(cal) => cal.impl_name(),
+            Calendar::Composite(cal1, cal2) => {
+                format!("Composite({}, {})", cal1.impl_name(), cal2.impl_name())
+            }
         };
         serializer.serialize_str(&s)
     }
@@ -96,6 +103,9 @@ impl From<Calendar> for String {
             Calendar::UnitedStates(_) => "UnitedStates".to_string(),
             Calendar::Brazil(_) => "Brazil".to_string(),
             Calendar::Chile(_) => "Chile".to_string(),
+            Calendar::Composite(cal1, cal2) => {
+                format!("Composite({}, {})", cal1.impl_name(), cal2.impl_name())
+            }
         }
     }
 }
@@ -109,6 +119,9 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.impl_name(),
             Calendar::Brazil(cal) => cal.impl_name(),
             Calendar::Chile(cal) => cal.impl_name(),
+            Calendar::Composite(cal1, cal2) => {
+                format!("Composite({}, {})", cal1.impl_name(), cal2.impl_name())
+            }
         }
     }
 
@@ -120,6 +133,9 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.impl_is_business_day(date),
             Calendar::Brazil(cal) => cal.impl_is_business_day(date),
             Calendar::Chile(cal) => cal.impl_is_business_day(date),
+            Calendar::Composite(cal1, cal2) => {
+                cal1.impl_is_business_day(date) && cal2.impl_is_business_day(date)
+            }
         }
     }
 
@@ -131,6 +147,11 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.added_holidays(),
             Calendar::Brazil(cal) => cal.added_holidays(),
             Calendar::Chile(cal) => cal.added_holidays(),
+            Calendar::Composite(cal1, cal2) => {
+                let mut holidays = cal1.added_holidays();
+                holidays.extend(cal2.added_holidays());
+                holidays
+            }
         }
     }
 
@@ -142,6 +163,11 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.removed_holidays(),
             Calendar::Brazil(cal) => cal.removed_holidays(),
             Calendar::Chile(cal) => cal.removed_holidays(),
+            Calendar::Composite(cal1, cal2) => {
+                let mut holidays = cal1.removed_holidays();
+                holidays.extend(cal2.removed_holidays());
+                holidays
+            }
         }
     }
 
@@ -153,6 +179,10 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.add_holiday(date),
             Calendar::Brazil(cal) => cal.add_holiday(date),
             Calendar::Chile(cal) => cal.add_holiday(date),
+            Calendar::Composite(cal1, cal2) => {
+                cal1.add_holiday(date);
+                cal2.add_holiday(date);
+            }
         }
     }
 
@@ -164,6 +194,10 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.remove_holiday(date),
             Calendar::Brazil(cal) => cal.remove_holiday(date),
             Calendar::Chile(cal) => cal.remove_holiday(date),
+            Calendar::Composite(cal1, cal2) => {
+                cal1.remove_holiday(date);
+                cal2.remove_holiday(date);
+            }
         }
     }
 
@@ -175,6 +209,11 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.holiday_list(from, to, include_weekends),
             Calendar::Brazil(cal) => cal.holiday_list(from, to, include_weekends),
             Calendar::Chile(cal) => cal.holiday_list(from, to, include_weekends),
+            Calendar::Composite(cal1, cal2) => {
+                let mut holidays = cal1.holiday_list(from, to, include_weekends);
+                holidays.extend(cal2.holiday_list(from, to, include_weekends));
+                holidays
+            }
         }
     }
 
@@ -186,6 +225,11 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.business_day_list(from, to),
             Calendar::Brazil(cal) => cal.business_day_list(from, to),
             Calendar::Chile(cal) => cal.business_day_list(from, to),
+            Calendar::Composite(cal1, cal2) => {
+                let mut business_days = cal1.business_day_list(from, to);
+                business_days.extend(cal2.business_day_list(from, to));
+                business_days
+            }
         }
     }
 }
@@ -194,6 +238,7 @@ impl IsCalendar for Calendar {}
 
 #[cfg(test)]
 mod tests {
+    use crate::time::calendars::traits::IsCalendar;
     use crate::time::date::Date;
     use crate::time::{
         calendar::Calendar,
@@ -202,6 +247,7 @@ mod tests {
             traits::ImplCalendar, unitedstates::UnitedStates, weekendsonly::WeekendsOnly,
         },
     };
+    use serde_json;
 
     #[test]
     fn test_create_calendar() {
@@ -217,6 +263,14 @@ mod tests {
         assert_eq!(calendar.impl_name(), "Brazil(Settlement)");
         let calendar = Calendar::Chile(Chile::default());
         assert_eq!(calendar.impl_name(), "Chile(SSE)");
+        let calendar = Calendar::Composite(
+            Box::new(Calendar::TARGET(TARGET::new())),
+            Box::new(Calendar::UnitedStates(UnitedStates::default())),
+        );
+        assert_eq!(
+            calendar.impl_name(),
+            "Composite(TARGET, UnitedStates(Sofr))"
+        );
     }
 
     #[test]
@@ -260,5 +314,118 @@ mod tests {
         let calendar = Calendar::NullCalendar(NullCalendar::new());
         let date = Date::new(2024, 1, 1);
         assert!(calendar.impl_is_business_day(&date));
+    }
+
+    #[test]
+    fn test_calendar_composite() {
+        let cal1 = Calendar::Chile(Chile::default());
+        let cal2 = Calendar::UnitedStates(UnitedStates::default());
+        let composite = Calendar::Composite(Box::new(cal1), Box::new(cal2));
+        assert_eq!(
+            composite.impl_name(),
+            "Composite(Chile(SSE), UnitedStates(Sofr))"
+        );
+
+        let date = Date::new(2024, 7, 4);
+        assert!(!composite.is_business_day(&date));
+
+        let date = Date::new(2024, 9, 18);
+        assert!(!composite.is_business_day(&date));
+    }
+
+    #[test]
+    fn test_calendar_composite_with_three_calendars() {
+        let cal1 = Calendar::Chile(Chile::default());
+        let cal2 = Calendar::UnitedStates(UnitedStates::default());
+        let composite1 = Calendar::Composite(Box::new(cal1), Box::new(cal2));
+        let cal3 = Calendar::Brazil(Brazil::default());
+        let composite2 = Calendar::Composite(Box::new(composite1), Box::new(cal3));
+        assert_eq!(
+            composite2.impl_name(),
+            "Composite(Composite(Chile(SSE), UnitedStates(Sofr)), Brazil(Settlement))"
+        );
+
+        let date = Date::new(2024, 7, 4);
+        assert!(!composite2.is_business_day(&date));
+
+        let date = Date::new(2024, 9, 18);
+        assert!(!composite2.is_business_day(&date));
+
+        let date = Date::new(2024, 10, 12);
+        assert!(!composite2.is_business_day(&date));
+    }
+
+    #[test]
+    fn test_calendar_serialize_deserialize() {
+        let calendar = Calendar::Brazil(Brazil::default());
+        let serialized = serde_json::to_string(&calendar).unwrap();
+        assert_eq!(serialized, "\"Brazil(Settlement)\"");
+        let deserialized: Calendar = serde_json::from_str("\"Brazil\"").unwrap();
+        assert_eq!(deserialized.impl_name(), "Brazil(Settlement)");
+        let invalid: Result<Calendar, _> = serde_json::from_str("\"Invalid\"");
+        assert!(invalid.is_err());
+    }
+
+    #[test]
+    fn test_calendar_added_and_removed_holidays_composite() {
+        let mut cal1 = Calendar::Chile(Chile::default());
+        let mut cal2 = Calendar::UnitedStates(UnitedStates::default());
+        let date1 = Date::new(2024, 9, 18);
+        let date2 = Date::new(2024, 7, 4);
+        cal1.add_holiday(date1);
+        cal2.add_holiday(date2);
+        let composite = Calendar::Composite(Box::new(cal1), Box::new(cal2));
+        let holidays = composite.added_holidays();
+        assert!(holidays.contains(&date1));
+        assert!(holidays.contains(&date2));
+    }
+
+    #[test]
+    fn test_calendar_remove_holiday_composite() {
+        let mut cal1 = Calendar::Chile(Chile::default());
+        let mut cal2 = Calendar::UnitedStates(UnitedStates::default());
+        let date1 = Date::new(2024, 9, 18);
+        let date2 = Date::new(2024, 7, 4);
+        cal1.remove_holiday(date1);
+        cal2.remove_holiday(date2);
+        let composite = Calendar::Composite(Box::new(cal1), Box::new(cal2));
+        let removed = composite.removed_holidays();
+        assert!(removed.contains(&date1));
+        assert!(removed.contains(&date2));
+    }
+
+    #[test]
+    fn test_calendar_holiday_and_business_day_list_composite() {
+        let cal1 = Calendar::WeekendsOnly(WeekendsOnly::new());
+        let cal2 = Calendar::NullCalendar(NullCalendar::new());
+        let composite = Calendar::Composite(Box::new(cal1), Box::new(cal2));
+        let from = Date::new(2024, 6, 1);
+        let to = Date::new(2024, 6, 7);
+        let holidays = composite.holiday_list(from, to, true);
+        let business_days = composite.business_day_list(from, to);
+        assert!(!holidays.is_empty());
+        assert!(!business_days.is_empty());
+    }
+
+    #[test]
+    fn test_calendar_impl_name_for_nested_composite() {
+        let cal1 = Calendar::Brazil(Brazil::default());
+        let cal2 = Calendar::Chile(Chile::default());
+        let composite = Calendar::Composite(Box::new(cal1), Box::new(cal2));
+        let cal3 = Calendar::TARGET(TARGET::new());
+        let nested = Calendar::Composite(Box::new(composite), Box::new(cal3));
+        assert_eq!(
+            nested.impl_name(),
+            "Composite(Composite(Brazil(Settlement), Chile(SSE)), TARGET)"
+        );
+    }
+
+    #[test]
+    fn test_calendar_is_business_day_for_weekends_only() {
+        let calendar = Calendar::WeekendsOnly(WeekendsOnly::new());
+        let weekday = Date::new(2024, 6, 3); // Monday
+        let weekend = Date::new(2024, 6, 2); // Sunday
+        assert!(calendar.is_business_day(&weekday));
+        assert!(!calendar.is_business_day(&weekend));
     }
 }
