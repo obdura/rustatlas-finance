@@ -1,18 +1,9 @@
 use nalgebra::DVector;
-use thiserror::Error;
 
 use crate::{
-    math::solver::traits::{Jacobian, Residual},
-    utils::errors::{AtlasError, Result},
+    math::solver::traits::{Jacobian, Residual}, prelude::SolverError, utils::errors::{AtlasError, Result}
 };
 
-#[derive(Debug, Error)]
-pub enum GaussNewtonError {
-    #[error("Solver error: {0}")]
-    SingularMatrix(String),
-    #[error("Solver error: {0}")]
-    MaxIterationsReached(String),
-}
 
 #[derive(Debug)]
 pub struct GaussNewtonResult {
@@ -79,7 +70,7 @@ where
                 Some(sol) => sol,
                 None => {
                     return Err(AtlasError::SolverError(
-                        GaussNewtonError::SingularMatrix("Jacobian is singular".to_string()),
+                        SolverError::SingularMatrix("Jacobian matrix is singular".to_string()),
                     ));
                 }
             };
@@ -94,7 +85,9 @@ where
 
         if !converged {
             return Err(AtlasError::SolverError(
-                GaussNewtonError::MaxIterationsReached("Maximum iterations reached without convergence".to_string()),
+                SolverError::MaxIterationsReached(
+                    "Maximum iterations reached without convergence".to_string(),
+                ),
             ));
         }
 
@@ -155,7 +148,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            AtlasError::SolverError(GaussNewtonError::SingularMatrix(_))
+            AtlasError::SolverError(SolverError::SingularMatrix(_))
         ));
     }
 
@@ -180,7 +173,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         if let AtlasError::SolverError(gauss_err) = err {
-            assert!(matches!(gauss_err, GaussNewtonError::MaxIterationsReached(_)));
+            assert!(matches!(gauss_err, SolverError::MaxIterationsReached(_)));
         } else {
             panic!("Expected AtlasError::SolverError");
         }
