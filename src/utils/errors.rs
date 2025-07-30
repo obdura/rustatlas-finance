@@ -37,6 +37,8 @@ pub enum AtlasError {
     BootstrappingErr(String),
     #[error("Solver Error: {0}")]
     SolverError(#[from] crate::math::solver::traits::SolverError),
+    #[error("Interpolation error: {0}")]
+    InterpolationErr(String),
 }
 
 pub type Result<T> = std::result::Result<T, AtlasError>;

@@ -336,7 +336,7 @@ mod tests {
 
         let mut overnight_index = OvernightCompoundedRateIndex::new(Date::new(2023, 6, 5)).with_fixings_rates(fixing);
 
-        overnight_index.fill_missing_fixings(Interpolator::Linear);
+        overnight_index.fill_missing_fixings(Interpolator::Linear)?;
 
         assert!(
             (overnight_index

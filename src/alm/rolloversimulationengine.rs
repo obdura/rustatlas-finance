@@ -116,16 +116,16 @@ impl<'a> RolloverSimulationEngine<'a> {
         let growth_vec: Vec<(Date, f64)> = self
             .eval_dates
             .iter()
-            .map(|date| {
+            .map(|date| -> Result<(Date, f64)> {
                 let yf_ = Actual360::year_fraction(*first_date, *date);
                 let value = if yf_ > last_yf {
                     last_value
                 } else {
-                    LinearInterpolator::interpolate(yf_, &yf, &values, true)
+                    LinearInterpolator::interpolate(yf_, &yf, &values, true)?
                 };
-                (*date, value)
+                Ok((*date, value))
             })
-            .collect();
+            .collect::<Result<Vec<(Date, f64)>>>()?;
 
         self.growth_vec = Some(growth_vec);
         Ok(self)

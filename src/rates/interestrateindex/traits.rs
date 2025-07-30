@@ -22,7 +22,7 @@ pub trait FixingProvider {
     fn fixing(&self, date: Date) -> Result<f64>;
     fn fixings(&self) -> &HashMap<Date, f64>;
     fn add_fixing(&mut self, date: Date, rate: f64);
-    fn fill_missing_fixings(&mut self, interpolator: Interpolator) {
+    fn fill_missing_fixings(&mut self, interpolator: Interpolator) -> Result<()> {
         if !self.fixings().is_empty() {
             let first_date = self.fixings().keys().min().unwrap().clone();
             let last_date = self.fixings().keys().max().unwrap().clone();
@@ -45,12 +45,14 @@ pub trait FixingProvider {
             while current_date <= last_date {
                 if !self.fixings().contains_key(&current_date) {
                     let days = (current_date - first_date) as f64;
-                    let rate = interpolator.interpolate(days, &x, &y, false);
+                    let rate = interpolator.interpolate(days, &x, &y, false)?;
                     self.add_fixing(current_date, rate);
                 }
                 current_date = current_date + Period::new(1, TimeUnit::Days);
             }
         }
+
+        Ok(())
     }
 }
 

@@ -345,7 +345,7 @@ impl YieldProvider for BootstrappingCurve {
             &self.year_fractions,
             &self.discount_factors,
             true,
-        );
+        )?;
         return Ok(discount_factor);
     }
 

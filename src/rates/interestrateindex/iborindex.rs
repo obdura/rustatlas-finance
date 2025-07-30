@@ -310,7 +310,7 @@ mod tests {
         .cloned()
         .collect();
         let mut ibor_index = IborIndex::new(Date::new(2023, 11, 6)).with_fixings(fixing);
-        ibor_index.fill_missing_fixings(Interpolator::Linear);
+        ibor_index.fill_missing_fixings(Interpolator::Linear)?;
         assert!(ibor_index.fixings().get(&Date::new(2023, 6, 3)).unwrap() - 21952.4266666 < 0.001);
         Ok(())
     }

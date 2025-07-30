@@ -145,7 +145,7 @@ impl YieldProvider for ZeroRateTermStructure {
             &self.year_fractions,
             &self.rates,
             self.enable_extrapolation,
-        );
+        )?;
         let rt = InterestRate::from_rate_definition(rate, self.rate_definition());
         let compound = rt.compound_factor_from_yf(year_fraction);
         return Ok(1.0 / compound);

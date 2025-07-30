@@ -396,7 +396,7 @@ mod tests {
 
         let mut overnight_index = OvernightIndex::new(Date::new(2023, 6, 5)).with_fixings(fixing);
 
-        overnight_index.fill_missing_fixings(Interpolator::Linear);
+        overnight_index.fill_missing_fixings(Interpolator::Linear)?;
 
         assert!(
             overnight_index
@@ -416,7 +416,7 @@ mod tests {
         fixing.insert(Date::new(2023, 6, 5), 21966.14);
 
         let mut overnight_index = OvernightIndex::new(Date::new(2023, 7, 6)).with_fixings(fixing);
-        overnight_index.fill_missing_fixings(Interpolator::Linear);
+        overnight_index.fill_missing_fixings(Interpolator::Linear)?;
 
         Ok(())
     }

@@ -162,7 +162,7 @@ impl YieldProvider for DiscountTermStructure {
             &self.year_fractions,
             &self.discount_factors,
             self.enable_extrapolation,
-        );
+        )?;
         return Ok(discount_factor);
     }
 

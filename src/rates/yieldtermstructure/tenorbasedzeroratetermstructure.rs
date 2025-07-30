@@ -99,7 +99,7 @@ impl YieldProvider for TenorBasedZeroRateTermStructure {
             &self.year_fractions,
             &self.spreads,
             self.enable_extrapolation,
-        );
+        )?;
         let rate = InterestRate::from_rate_definition(spread, self.rate_definition);
         Ok(1.0 / rate.compound_factor(self.reference_date, date))
     }
