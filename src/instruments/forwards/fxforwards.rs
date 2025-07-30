@@ -1,9 +1,10 @@
 use crate::{
-    cashflows::{cashflow::Cashflow, simplecashflow::SimpleCashflow},
+    cashflows::{cashflow::Cashflow, simplecashflow::SimpleCashflow, traits::Payable},
     core::traits::{HasCurrency, HasDiscountCurveId},
     currencies::enums::Currency,
-    visitors::traits::HasCashflows,
+    time::date::Date,
     utils::errors::Result,
+    visitors::traits::HasCashflows,
 };
 
 /// # forwards
@@ -125,6 +126,26 @@ impl FxForward {
     pub fn with_mtm(mut self, mtm: f64) -> Self {
         self.mtm = Some(mtm);
         self
+    }
+
+    pub fn end_date(&self) -> Date {
+        let pay_date = self
+            .pay_cashflows
+            .iter()
+            .map(|cf| cf.payment_date())
+            .max()
+            .unwrap();
+        let receive_date = self
+            .receive_cashflows
+            .iter()
+            .map(|cf| cf.payment_date())
+            .max()
+            .unwrap();
+        if pay_date > receive_date {
+            pay_date
+        } else {
+            receive_date
+        }
     }
 }
 
@@ -260,12 +281,11 @@ mod tests {
         let pay_date = Date::new(2021, 1, 1);
         let pay_currency = Currency::USD;
         let receive_currency = Currency::CLP;
-        let pay_cashflow =
-            SimpleCashflow::new(pay_date, pay_currency, Side::Pay).with_amount(50.0);
+        let pay_cashflow = SimpleCashflow::new(pay_date, pay_currency, Side::Pay).with_amount(50.0);
         let receive_cashflow =
             SimpleCashflow::new(pay_date, receive_currency, Side::Receive).with_amount(50.0);
-        let fx_forward = FxForward::new(pay_cashflow, receive_cashflow)?
-            .with_id("forward123".to_string());
+        let fx_forward =
+            FxForward::new(pay_cashflow, receive_cashflow)?.with_id("forward123".to_string());
         assert_eq!(fx_forward.id().unwrap(), "forward123".to_string());
         Ok(())
     }
@@ -340,7 +360,11 @@ mod tests {
         fx_forward
             .mut_cashflows()
             .for_each(|cf| cf.set_discount_curve_id(99));
-        for cf in fx_forward.pay_cashflows().iter().chain(fx_forward.receive_cashflows().iter()) {
+        for cf in fx_forward
+            .pay_cashflows()
+            .iter()
+            .chain(fx_forward.receive_cashflows().iter())
+        {
             assert_eq!(cf.discount_curve_id().unwrap(), 99);
         }
         Ok(())

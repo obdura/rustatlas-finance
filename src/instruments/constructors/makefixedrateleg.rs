@@ -353,9 +353,9 @@ impl MakeFixedRateLeg {
                 let fixing_schedule = schedule_builder.build()?;
                 let fixings_dates = fixing_schedule.dates();
 
-                let matury_date = fixings_dates.last().ok_or(
-                    AtlasError::ValueNotSetErr("Fixing schedule should have at least one date".into()),
-                )?;
+                let maturity_date = fixings_dates.last().ok_or(AtlasError::ValueNotSetErr(
+                    "Fixing schedule should have at least one date".into(),
+                ))?;
 
                 let payment_dates = match self.payment_lag {
                     Some(lag) => fixings_dates
@@ -366,6 +366,12 @@ impl MakeFixedRateLeg {
                         .collect(),
                     None => fixings_dates.clone(),
                 };
+
+                let last_payment_date = payment_dates
+                    .last()
+                    .ok_or(AtlasError::ValueNotSetErr(
+                        "Payment dates should have at least one date".into(),
+                    ))?;
 
                 let first_date: Vec<Date> = vec![*payment_dates.first().unwrap()];
                 let last_date: Vec<Date> = vec![*payment_dates.last().unwrap()];
@@ -386,7 +392,8 @@ impl MakeFixedRateLeg {
 
                 if self.final_flow {
                     add_cashflows_to_vec(
-                        &mut cashflows,                      &last_date,
+                        &mut cashflows,
+                        &last_date,
                         &vec![notional],
                         side,
                         currency,
@@ -414,7 +421,8 @@ impl MakeFixedRateLeg {
                 let leg = Leg::new(
                     self.negotiation_date,
                     adjusted_start_date,
-                    *matury_date,
+                    *maturity_date,
+                    *last_payment_date,
                     notional,
                     payment_frequency,
                     structure,
@@ -469,18 +477,28 @@ fn build_coupons_from_notionals(
 }
 
 #[cfg(test)]
-mod tests{
+mod tests {
 
     use super::MakeFixedRateLeg;
     use crate::{
-        cashflows::{side::Side, traits::Payable}, currencies::enums::Currency, rates::{enums::Compounding, interestrate::{InterestRate, RateDefinition}}, time::{
+        cashflows::{side::Side, traits::Payable},
+        currencies::enums::Currency,
+        rates::{
+            enums::Compounding,
+            interestrate::{InterestRate, RateDefinition},
+        },
+        time::{
             calendar::Calendar,
-            calendars::{chile::Chile, unitedstates::{UnitedStates, UnitedStatesMarket}},
+            calendars::{
+                chile::Chile,
+                unitedstates::{UnitedStates, UnitedStatesMarket},
+            },
             date::Date,
             daycounter::DayCounter,
             enums::{BusinessDayConvention, DateGenerationRule, Frequency, TimeUnit},
             period::Period,
-        }, visitors::traits::HasCashflows
+        },
+        visitors::traits::HasCashflows,
     };
 
     #[test]
@@ -540,7 +558,7 @@ mod tests{
             .unwrap();
 
         let cashflows = instrument.cashflows_as_vec();
- 
+
         let dates = vec![
             Date::new(2030, 1, 28),
             Date::new(2025, 7, 28),
@@ -558,7 +576,6 @@ mod tests{
         for cf in cashflows {
             assert!(dates.contains(&cf.payment_date()));
         }
-
     }
 
     #[test]
@@ -649,7 +666,7 @@ mod tests{
             .unwrap();
 
         assert!(fix_leg.cashflows_as_vec().len() == 2);
-    }   
+    }
 
     #[test]
     fn test_payment_date_in_make_fixed_rate_leg_with_sofr_calendar() {
@@ -661,7 +678,6 @@ mod tests{
             Compounding::Compounded,
             Frequency::Annual,
         );
-
 
         let rate = InterestRate::from_rate_definition(0.5, rate_definition);
         let notional = 1_000_000.0;
@@ -712,7 +728,6 @@ mod tests{
             Compounding::Compounded,
             Frequency::Annual,
         );
-
 
         let rate = InterestRate::from_rate_definition(0.5, rate_definition);
         let notional = 1_000_000.0;

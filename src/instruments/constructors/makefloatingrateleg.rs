@@ -333,6 +333,12 @@ impl MakeFloatingRateLeg {
                     None => fixings_dates.clone(),
                 };
 
+                let last_payment_date = payment_dates
+                    .last()
+                    .ok_or(AtlasError::ValueNotSetErr(
+                        "Payment dates should have at least one date".into(),
+                    ))?;
+
                 let first_date: Vec<Date> = vec![*payment_dates.first().unwrap()];
                 let last_date: Vec<Date> = vec![*payment_dates.last().unwrap()];
 
@@ -390,6 +396,7 @@ impl MakeFloatingRateLeg {
                     self.negotiation_date,
                     adjusted_start_date,
                     *maturity_date,
+                    *last_payment_date,
                     notional,
                     payment_frequency,
                     structure,

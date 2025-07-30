@@ -78,6 +78,10 @@ impl VanillaIRSSwap {
     pub fn second_rate_type(&self) -> RateType {
         self.second_rate_type
     }
+
+    pub fn last_payment_date(&self) -> Date {
+        self.first_leg.last_payment_date().max(self.second_leg.last_payment_date())
+    }
 }
 
 impl HasCurrency for VanillaIRSSwap {

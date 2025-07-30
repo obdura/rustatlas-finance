@@ -20,7 +20,8 @@ use std::fmt::Display;
 pub struct Leg {
     negotiation_date: Option<Date>,
     start_date: Date,
-    end_date: Date,
+    end_date: Date, // maturity date
+    last_payment_date: Date, // last payment date
     notional: f64,
     payment_frequency: Frequency,
     structure: Structure,
@@ -40,6 +41,7 @@ impl Leg {
         negotiation_date: Option<Date>,
         start_date: Date,
         end_date: Date,
+        last_payment_date: Date,
         notional: f64,
         payment_frequency: Frequency,
         structure: Structure,
@@ -56,6 +58,7 @@ impl Leg {
             negotiation_date,
             start_date,
             end_date,
+            last_payment_date, 
             notional,
             payment_frequency,
             structure,
@@ -82,6 +85,10 @@ impl Leg {
     pub fn end_date(&self) -> Date {
         self.end_date
     }
+
+    pub fn last_payment_date(&self) -> Date {
+        self.last_payment_date
+    }   
 
     pub fn notional(&self) -> f64 {
         self.notional
