@@ -1,6 +1,6 @@
 use crate::cashflows::cashflow::Cashflow;
 use crate::instruments::traits::RateType;
-use crate::prelude::Date;
+use crate::time::date::Date;
 //use crate::instruments::traits::RateType;
 use crate::visitors::traits::HasCashflows;
 use crate::{core::traits::HasCurrency, currencies::enums::Currency};

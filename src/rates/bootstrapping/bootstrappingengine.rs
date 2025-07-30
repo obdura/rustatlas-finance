@@ -1,13 +1,10 @@
 use std::fmt::Display;
 
 use crate::{
-    currencies::enums::Currency,
-    rates::{
+    currencies::enums::Currency, rates::{
         bootstrapping::bootstrappingmarketstore::BootstrappingMarketStore,
         traits::HasReferenceDate,
-    },
-    time::date::Date,
-    utils::errors::{AtlasError, Result}, visitors::traits::HasCashflows,
+    }, time::date::Date, utils::errors::{AtlasError, Result}, visitors::traits::HasCashflows
 };
 
 /// # BootstrappingEngine
@@ -155,6 +152,7 @@ impl BootstrappingEngine {
             vec![]
         }
     }
+
 }
 
 use colored::*;

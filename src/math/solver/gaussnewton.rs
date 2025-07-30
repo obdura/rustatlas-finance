@@ -1,7 +1,7 @@
 use nalgebra::DVector;
 
 use crate::{
-    math::solver::traits::{Jacobian, Residual}, prelude::SolverError, utils::errors::{AtlasError, Result}
+    math::solver::traits::{Jacobian, Residual, SolverError}, utils::errors::{AtlasError, Result}
 };
 
 

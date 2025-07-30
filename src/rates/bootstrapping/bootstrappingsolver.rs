@@ -30,8 +30,9 @@ pub struct BootstrappingSolver<'a> {
     engine: &'a RefCell<BootstrappingEngine>,
     indexer: IndexingVisitor,
     optimization_order: Option<Vec<Vec<(usize, usize)>>>,
-    max_iterations: usize,
-    tolerance: f64,
+    max_iterations: usize, // Maximum number of iterations for the optimization
+    tolerance: f64,        // Tolerance for convergence
+    epsilon: f64,          // Epsilon for numerical differentiation
 }
 
 impl<'a> BootstrappingSolver<'a> {
@@ -49,22 +50,10 @@ impl<'a> BootstrappingSolver<'a> {
             engine,
             indexer,
             optimization_order: None,
-            max_iterations: 1000,
+            max_iterations: 500,
             tolerance: 1e-14,
+            epsilon: 1e-12,
         })
-    }
-
-    pub fn run_optimization(&self) -> Result<()> {
-        let init = self.engine.borrow().relevant_discount_factors();
-        let init_guess = DVector::from_vec(init.clone());
-        let solver = GaussNewton::new(self, init_guess)
-            .with_max_iterations(self.max_iterations)
-            .with_tolerance(self.tolerance);
-        let res = solver.solve()?;
-        let solution = res.solution;
-        let mut engine = self.engine.borrow_mut();
-        engine.update_discount_factors(solution.as_slice())?;
-        Ok(())
     }
 
     pub fn with_optimization_order(mut self, optimization_order: Vec<Vec<(usize, usize)>>) -> Self {
@@ -98,16 +87,51 @@ impl<'a> BootstrappingSolver<'a> {
         self
     }
 
+    pub fn with_epsilon(mut self, epsilon: f64) -> Self {
+        self.epsilon = epsilon;
+        self
+    }
+
+    pub fn configure(&mut self, max_iterations: usize, tolerance: f64, epsilon: f64) -> &mut Self {
+        self.max_iterations = max_iterations;
+        self.tolerance = tolerance;
+        self.epsilon = epsilon;
+        self
+    }
+
+    pub fn run_optimization(&self) -> Result<()> {
+        let init = self.engine.borrow().relevant_discount_factors();
+        let init_guess = DVector::from_vec(init.clone());
+        let solver = GaussNewton::new(self, init_guess)
+            .with_max_iterations(self.max_iterations)
+            .with_tolerance(self.tolerance);
+        let res = solver.solve()?;
+        let solution = res.solution;
+        println!("\t\t Optimization completed with n iterations: {}", res.iterations);
+        let mut engine = self.engine.borrow_mut();
+        engine.update_discount_factors(solution.as_slice())?;
+        Ok(())
+    }
+
     pub fn run(&self) -> Result<()> {
         let start_time = std::time::Instant::now();
-        let optimization_orders = self.optimization_order.clone().unwrap();
+        println!("\t Starting bootstrapping optimization...");
+
+        let optimization_orders = match &self.optimization_order {
+            Some(orders) if !orders.is_empty() => orders.clone(),
+            _ => {
+                println!("\t No optimization orders provided, nothing to run.");
+                return Ok(());
+            }
+        };
+
         for order in optimization_orders {
             self.engine.borrow_mut().set_optimization_order(order);
             self.run_optimization()?;
         }
 
         let duration = start_time.elapsed();
-        println!("Optimization took {:?}", duration);
+        println!("\t Optimization took {:?}", duration);
         Ok(())
     }
 
@@ -152,7 +176,7 @@ impl<'a> Residual for &BootstrappingSolver<'a> {
 /// Implementing the Jacobian trait for BootstrappingSolver
 impl<'a> Jacobian for &BootstrappingSolver<'a> {
     fn jacobian(&self, x: &nalgebra::DVector<f64>) -> Result<DMatrix<f64>> {
-        let epsilon = 1e-10;
+        let epsilon = self.epsilon;
         let n = x.len();
         let mut jacobian = DMatrix::zeros(n, n);
         for i in 0..n {
@@ -174,7 +198,7 @@ impl<'a> Jacobian for &BootstrappingSolver<'a> {
 
 impl<'a> Hessian for &BootstrappingSolver<'a> {
     fn hessian(&self, param: &nalgebra::DVector<f64>) -> Result<DMatrix<f64>> {
-        let epsilon = 1e-6;
+        let epsilon = self.epsilon;
         let n = param.len();
         let mut hessian = DMatrix::zeros(n, n);
         for i in 0..n {

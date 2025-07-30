@@ -1,6 +1,5 @@
 use crate::{
-    math::solver::traits::{Gradient, Hessian},
-    prelude::SolverError,
+    math::solver::traits::{Gradient, Hessian, SolverError},
     utils::errors::{AtlasError, Result},
 };
 use nalgebra::DVector;
