@@ -107,7 +107,7 @@ impl<'a> BootstrappingSolver<'a> {
             .with_tolerance(self.tolerance);
         let res = solver.solve()?;
         let solution = res.solution;
-        println!("\t\t Optimization completed with n iterations: {}", res.iterations);
+        println!("\t\t Optimization completed with n iterations: {} and max residual: {:.2e}", res.iterations, res.max_residual);
         let mut engine = self.engine.borrow_mut();
         engine.update_discount_factors(solution.as_slice())?;
         Ok(())

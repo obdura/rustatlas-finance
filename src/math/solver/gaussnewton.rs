@@ -10,6 +10,7 @@ pub struct GaussNewtonResult {
     pub solution: DVector<f64>,
     pub iterations: usize,
     pub final_residual_norm: f64,
+    pub max_residual: f64,
     pub converged: bool,
 }
 
@@ -20,7 +21,7 @@ where
     problem: P,
     max_iterations: usize,
     tolerance: f64,
-    initial_guess: DVector<f64>, // <- nuevo campo
+    initial_guess: DVector<f64>, 
 }
 
 impl<P> GaussNewton<P>
@@ -90,11 +91,12 @@ where
                 ),
             ));
         }
-
+        let max_residual = self.problem.residual(&x)?.max();
         Ok(GaussNewtonResult {
             solution: x,
             iterations,
             final_residual_norm,
+            max_residual,
             converged,
         })
     }
