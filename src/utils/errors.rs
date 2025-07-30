@@ -35,6 +35,8 @@ pub enum AtlasError {
     IndexingErr(String),
     #[error("Bootstrapping error: {0}")]
     BootstrappingErr(String),
+    #[error("Solver Error: {0}")]
+    SolverError(#[from] crate::math::solver::gaussnewton::GaussNewtonError),
 }
 
 pub type Result<T> = std::result::Result<T, AtlasError>;

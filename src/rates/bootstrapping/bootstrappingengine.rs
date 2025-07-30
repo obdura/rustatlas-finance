@@ -3,7 +3,7 @@ use std::fmt::Display;
 use crate::{
     currencies::enums::Currency,
     rates::{
-        bootstrapping::{bootstrappingmarketstore::BootstrappingMarketStore, traits::Pillar},
+        bootstrapping::bootstrappingmarketstore::BootstrappingMarketStore,
         traits::HasReferenceDate,
     },
     time::date::Date,
@@ -22,7 +22,6 @@ use crate::{
 pub struct BootstrappingEngine {
     reference_date: Date,
     market_store: BootstrappingMarketStore,
-    pillars: Pillar,
     instruments: Vec<Box<dyn HasCashflows>>,
     number_of_instruments: usize,
     optimization_order: Vec<(usize, usize)>,
@@ -33,7 +32,6 @@ impl BootstrappingEngine {
         BootstrappingEngine {
             reference_date,
             market_store: BootstrappingMarketStore::new(reference_date, local_currency),
-            pillars: Pillar::MaturityDate,
             instruments: Vec::new(),
             number_of_instruments: 0,
             optimization_order: Vec::new(),
@@ -76,10 +74,6 @@ impl BootstrappingEngine {
         self.optimization_order = order;
     }
 
-    pub fn set_pillars(&mut self, pillars: Pillar) {
-        self.pillars = pillars;
-    }
-
     pub fn add_instrument(
         &mut self,
         curve_id: usize,
@@ -100,7 +94,7 @@ impl BootstrappingEngine {
         Ok(())
     }
 
-    pub fn update_discount_factors(&mut self, new_discount_factors: &Vec<f64>) -> Result<()> {
+    pub fn update_discount_factors(&mut self, new_discount_factors: &[f64]) -> Result<()> {
         if new_discount_factors.len() != self.optimization_order.len() {
             return Err(AtlasError::BootstrappingErr(format!(
                 "Number of new discount factors ({}) does not match the number indexes ({})",
@@ -110,25 +104,17 @@ impl BootstrappingEngine {
         }
 
         let curves_map = self.market_store.curves_map_mut();
-        for ((curve_id, element_id), new_df) in self
-            .optimization_order
-            .iter()
-            .zip(new_discount_factors.iter())
-        {
-            if let Some(curve) = curves_map.get_mut(curve_id) {
-                let discount_factors = curve.discount_factors_mut();
-                if let Some(df) = discount_factors.get_mut(*element_id) {
-                    *df = *new_df;
-                } else {
-                    return Err(AtlasError::BootstrappingErr(format!(
-                        "Index {} out of bounds for curve {}",
-                        element_id, curve_id
-                    )));
-                }
+        for ((curve_id, element_id), &new_df) in self.optimization_order.iter().zip(new_discount_factors.iter()) {
+            let curve = curves_map.get_mut(curve_id).ok_or_else(|| {
+                AtlasError::BootstrappingErr(format!("Curve with id {} not found", curve_id))
+            })?;
+            let discount_factors = curve.discount_factors_mut();
+            if let Some(df) = discount_factors.get_mut(*element_id) {
+                *df = new_df;
             } else {
                 return Err(AtlasError::BootstrappingErr(format!(
-                    "Curve with id {} not found",
-                    curve_id
+                    "Index {} out of bounds for curve {}",
+                    element_id, curve_id
                 )));
             }
         }
@@ -159,6 +145,15 @@ impl BootstrappingEngine {
             }
         }
         relevant_discount_factors
+    }
+
+    pub fn estimated_relevant_discount_factors(&self, curve_id: usize) -> Vec<(usize, usize)> {
+        let curve = self.market_store.curves_map().get(&curve_id);
+        if let Some(curve) = curve {
+            curve.dates().iter().skip(1).enumerate().map(|(i, _)| (curve_id, i+1)).collect()
+        } else {
+            vec![]
+        }
     }
 }
 
@@ -646,4 +641,79 @@ mod tests {
         assert!(display.contains("Curves:"));
         Ok(())
     }
+
+    #[test]
+    fn test_bootstrapping_engine_estimate_relevant_discount_factors() -> Result<()> {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let bootstrappingmarketstore = engine.market_store_mut();
+        bootstrappingmarketstore.add_curve(1, Currency::USD)?;
+
+        let end_date = ref_date + Period::new(1, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.05,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        );
+
+        let inst1 = MakeFixedRateInstrument::new()
+            .with_currency(Currency::USD)
+            .with_side(Side::Receive)
+            .with_start_date(ref_date)
+            .with_end_date(end_date)
+            .with_rate(rate)
+            .with_notional(1_000_000.0)
+            .with_discount_curve_id(Some(1)) // Assuming the curve ID is 1
+            .zero()
+            .build()?;
+
+        engine.add_instrument(1, end_date, Box::new(inst1))?;
+
+        let end_date = ref_date + Period::new(2, TimeUnit::Years);
+        let inst2 = MakeFixedRateInstrument::new()
+            .with_currency(Currency::USD)
+            .with_side(Side::Receive)
+            .with_start_date(ref_date)
+            .with_end_date(end_date)
+            .with_rate(rate)
+            .with_notional(1_000_000.0)
+            .with_discount_curve_id(Some(1)) // Assuming the curve ID is 1
+            .zero()
+            .build()?;
+
+        engine.add_instrument(1, end_date, Box::new(inst2))?;
+
+        let estimated_dfs = engine.estimated_relevant_discount_factors(1);
+
+        assert_eq!(estimated_dfs.len(), 2);
+        assert_eq!(estimated_dfs, vec![(1, 1), (1, 2)]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_bootstrapping_engine_estimate_relevant_discount_factors_empty_curve() -> Result<()> {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let bootstrappingmarketstore = engine.market_store_mut();
+        bootstrappingmarketstore.add_curve(1, Currency::USD)?;
+
+        let estimated_dfs = engine.estimated_relevant_discount_factors(1);
+        assert!(estimated_dfs.is_empty(), "Expected no discount factors for empty curve");
+        Ok(())
+    }
+
+    #[test]
+    fn test_bootstrapping_engine_estimate_relevant_discount_factors_not_set_curve() -> Result<()> {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let bootstrappingmarketstore = engine.market_store_mut();
+        bootstrappingmarketstore.add_curve(1, Currency::USD)?;
+
+        let estimated_dfs = engine.estimated_relevant_discount_factors(2);
+        assert!(estimated_dfs.is_empty(), "Expected no discount factors for non-existent curve");
+        Ok(())
+    }
+
 }

@@ -1,4 +1,8 @@
 use crate::{
+    math::solver::{
+        gaussnewton::GaussNewton,
+        traits::{Hessian, Jacobian, Residual},
+    },
     models::traits::Model,
     rates::bootstrapping::{
         bootstrappingengine::BootstrappingEngine, bootstrappingmarketstore::BootstrappingModel,
@@ -10,16 +14,14 @@ use crate::{
         traits::{ConstVisit, Visit},
     },
 };
-use argmin::{
-    core::{CostFunction, Executor, State},
-    solver::neldermead::NelderMead,
-};
+
+use nalgebra::{DMatrix, DVector};
 use std::cell::RefCell;
 
 /// # BootstrappingSolver
 /// BootstrappingSolver is a solver that optimizes the bootstrapping process.
-/// It uses the Nelder-Mead algorithm to find the optimal bootstrapping parameters.
-/// 
+/// it implements the Residual and Jacobian traits to compute the residuals and Jacobian matrix for the bootstrapping process.
+///
 /// ## Parameters
 /// * `engine` - The bootstrapping engine
 /// * `indexer` - The indexing visitor
@@ -27,6 +29,9 @@ use std::cell::RefCell;
 pub struct BootstrappingSolver<'a> {
     engine: &'a RefCell<BootstrappingEngine>,
     indexer: IndexingVisitor,
+    optimization_order: Option<Vec<Vec<(usize, usize)>>>,
+    max_iterations: usize,
+    tolerance: f64,
 }
 
 impl<'a> BootstrappingSolver<'a> {
@@ -40,36 +45,62 @@ impl<'a> BootstrappingSolver<'a> {
                 indexer.visit(&mut instrument)?;
                 Ok(())
             })?;
-        Ok(BootstrappingSolver { engine, indexer })
+        Ok(BootstrappingSolver {
+            engine,
+            indexer,
+            optimization_order: None,
+            max_iterations: 1000,
+            tolerance: 1e-14,
+        })
     }
 
     pub fn run_optimization(&self) -> Result<()> {
-        let n = self.engine.borrow().optimization_order_len();
         let init = self.engine.borrow().relevant_discount_factors();
-        let mut simplex = Vec::with_capacity(n + 1);
-        simplex.push(init.clone());
-        for i in 0..n {
-            let mut v = init.clone();
-            v[i] -= 0.5 / n as f64;
-            simplex.push(v);
-        }
-
-        let solver = NelderMead::new(simplex);
-        let res = Executor::new(self, solver)
-            .configure(|state| state.param(init).max_iters(1_000_000).target_cost(1e-15))
-            .run()?;
-
-        println!("Bootstrapping optimization completed in {} iterations with a final cost of {:.2e}.", res.state().get_iter(), res.state().get_best_cost());
-        let solution = res.state().get_param().unwrap();
+        let init_guess = DVector::from_vec(init.clone());
+        let solver = GaussNewton::new(self, init_guess)
+            .with_max_iterations(self.max_iterations)
+            .with_tolerance(self.tolerance);
+        let res = solver.solve()?;
+        let solution = res.solution;
         let mut engine = self.engine.borrow_mut();
-        engine.update_discount_factors(solution)?;
-
+        engine.update_discount_factors(solution.as_slice())?;
         Ok(())
     }
 
-    pub fn run(&self, optimization_orders: Vec<Vec<(usize, usize)>>) -> Result<()> {
-        let start_time = std::time::Instant::now();
+    pub fn with_optimization_order(mut self, optimization_order: Vec<Vec<(usize, usize)>>) -> Self {
+        self.optimization_order = Some(optimization_order);
+        self
+    }
 
+    pub fn with_optimization_order_by_curve_id(mut self, curve_ids: Vec<Vec<usize>>) -> Self {
+        let binding = self.engine.borrow();
+        let order: Vec<Vec<(usize, usize)>> = curve_ids
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .flat_map(|curve_id| binding.estimated_relevant_discount_factors(curve_id))
+                    .collect()
+            })
+            .collect();
+
+        self.optimization_order = Some(order);
+        self
+    }
+
+    pub fn with_max_iterations(mut self, max_iterations: usize) -> Self {
+        self.max_iterations = max_iterations;
+        self
+    }
+
+    pub fn with_tolerance(mut self, tolerance: f64) -> Self {
+        self.tolerance = tolerance;
+        self
+    }
+
+    pub fn run(&self) -> Result<()> {
+        let start_time = std::time::Instant::now();
+        let optimization_orders = self.optimization_order.clone().unwrap();
         for order in optimization_orders {
             self.engine.borrow_mut().set_optimization_order(order);
             self.run_optimization()?;
@@ -77,19 +108,10 @@ impl<'a> BootstrappingSolver<'a> {
 
         let duration = start_time.elapsed();
         println!("Optimization took {:?}", duration);
-
         Ok(())
     }
-}
 
-impl<'a> CostFunction for &BootstrappingSolver<'a> {
-    type Param = Vec<f64>;
-    type Output = f64;
-
-    fn cost(
-        &self,
-        discount_factors: &Self::Param,
-    ) -> std::result::Result<f64, argmin::core::Error> {
+    pub fn compute_residuals(&self, discount_factors: &Vec<f64>) -> Result<Vec<f64>> {
         let mut engine = self.engine.borrow_mut();
         engine
             .update_discount_factors(discount_factors)
@@ -102,25 +124,87 @@ impl<'a> CostFunction for &BootstrappingSolver<'a> {
         let fixing_visitor = FixingVisitor::new(&data).with_decimals_to_round(16);
         let npv_visitor = NPVConstVisitor::new(&data, true);
 
-        let sum_sq_npv = engine.instruments_mut().iter_mut().enumerate().try_fold(
-            0.0,
-            |acc, (index, mut instrument)| -> Result<f64> {
-                if relevant_instruments.contains(&index) {
-                    fixing_visitor.visit(&mut instrument)?;
-                    let npv = npv_visitor.visit(&instrument)?;
-                    Ok(acc + npv * npv)
-                } else {
-                    Ok(acc)
-                }
-            },
-        )?;
-        Ok(sum_sq_npv)
+        let residuals = engine
+            .instruments_mut()
+            .iter_mut()
+            .enumerate()
+            .filter(|(index, _)| relevant_instruments.contains(index))
+            .map(|(_, mut instrument)| {
+                fixing_visitor.visit(&mut instrument)?;
+                let npv = npv_visitor.visit(&instrument)?;
+                Ok(npv)
+            })
+            .collect::<Result<Vec<f64>>>()?;
+
+        Ok(residuals)
+    }
+}
+
+/// Implementing the Operator trait for BootstrappingSolver
+impl<'a> Residual for &BootstrappingSolver<'a> {
+    fn residual(&self, x: &nalgebra::DVector<f64>) -> Result<DVector<f64>> {
+        let discount_factors: Vec<f64> = x.iter().map(|&v| v).collect();
+        let residuals = self.compute_residuals(&discount_factors)?;
+        Ok(DVector::from_vec(residuals))
+    }
+}
+
+/// Implementing the Jacobian trait for BootstrappingSolver
+impl<'a> Jacobian for &BootstrappingSolver<'a> {
+    fn jacobian(&self, x: &nalgebra::DVector<f64>) -> Result<DMatrix<f64>> {
+        let epsilon = 1e-10;
+        let n = x.len();
+        let mut jacobian = DMatrix::zeros(n, n);
+        for i in 0..n {
+            let mut plus = x.clone();
+            let mut minus = x.clone();
+            plus[i] += epsilon;
+            minus[i] -= epsilon;
+
+            let r_plus = self.residual(&plus)?;
+            let r_minus = self.residual(&minus)?;
+
+            for j in 0..n {
+                jacobian[(j, i)] = (r_plus[j] - r_minus[j]) / (2.0 * epsilon);
+            }
+        }
+        Ok(jacobian)
+    }
+}
+
+impl<'a> Hessian for &BootstrappingSolver<'a> {
+    fn hessian(&self, param: &nalgebra::DVector<f64>) -> Result<DMatrix<f64>> {
+        let epsilon = 1e-6;
+        let n = param.len();
+        let mut hessian = DMatrix::zeros(n, n);
+        for i in 0..n {
+            for j in 0..n {
+                let mut plus_plus = param.clone();
+                let mut plus_minus = param.clone();
+                let mut minus_plus = param.clone();
+                let mut minus_minus = param.clone();
+                plus_plus[i] += epsilon;
+                plus_plus[j] += epsilon;
+                plus_minus[i] += epsilon;
+                minus_plus[j] -= epsilon;
+                minus_minus[i] -= epsilon;
+                minus_minus[j] -= epsilon;
+
+                let r_pp = self.residual(&plus_plus)?;
+                let r_pm = self.residual(&plus_minus)?;
+                let r_mp = self.residual(&minus_plus)?;
+                let r_mm = self.residual(&minus_minus)?;
+
+                hessian[(i, j)] =
+                    (r_pp[i] - r_pm[i] - r_mp[i] + r_mm[i]) / (4.0 * epsilon * epsilon);
+            }
+        }
+        Ok(hessian)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
     use crate::{
         cashflows::{side::Side, traits::InterestAccrual},
         currencies::enums::Currency,
@@ -146,6 +230,7 @@ mod tests {
             period::Period,
         },
     };
+    use std::time::Instant;
 
     use super::*;
 
@@ -278,29 +363,44 @@ mod tests {
         let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 5)?;
         engine.add_instrument(5, swap9.accrual_end_date()?, Box::new(swap9))?;
 
-        let optimization_orders = vec![
-            vec![(5, 1) , (5, 2), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (5, 10), (5, 11)],
-        ];
+        let optimization_orders = vec![vec![
+            (5, 1),
+            (5, 2),
+            (5, 3),
+            (5, 4),
+            (5, 5),
+            (5, 6),
+            (5, 7),
+            (5, 8),
+            (5, 9),
+            (5, 10),
+            (5, 11),
+        ]];
 
         let engine_cell = RefCell::new(engine);
-        let bootstrapping_optimization = BootstrappingSolver::new(&engine_cell)?;
-        bootstrapping_optimization.run(optimization_orders)?;
+        let bootstrapping_optimization =
+            BootstrappingSolver::new(&engine_cell)?.with_optimization_order(optimization_orders);
+        bootstrapping_optimization.run()?;
 
         println!("Bootstrapping optimization completed successfully.");
         println!("Engine state: {}", engine_cell.borrow());
 
-
         let duration = start_time.elapsed();
         println!("Optimization took {:?}", duration);
 
-
         let binding = engine_cell.borrow();
-        let curve = binding.market_store().curves_map().get(&5).unwrap().discount_factors().get(9).unwrap();
+        let curve = binding
+            .market_store()
+            .curves_map()
+            .get(&5)
+            .unwrap()
+            .discount_factors()
+            .get(9)
+            .unwrap();
         assert!((curve - 0.93006371).abs() < 1e-8);
- 
+
         Ok(())
     }
-
 
     #[test]
     fn test_bootstrapping_engine_run_optimization_by_order() -> Result<()> {
@@ -370,8 +470,9 @@ mod tests {
         ];
 
         let engine_cell = RefCell::new(engine);
-        let bootstrapping_optimization = BootstrappingSolver::new(&engine_cell)?;
-        bootstrapping_optimization.run(optimization_orders)?;
+        let bootstrapping_optimization =
+            BootstrappingSolver::new(&engine_cell)?.with_optimization_order(optimization_orders);
+        bootstrapping_optimization.run()?;
 
         println!("Bootstrapping optimization completed successfully.");
         println!("Engine state: {}", engine_cell.borrow());
@@ -380,13 +481,18 @@ mod tests {
         println!("Optimization took {:?}", duration);
 
         let binding = engine_cell.borrow();
-        let curve = binding.market_store().curves_map().get(&5).unwrap().discount_factors().get(9).unwrap();
+        let curve = binding
+            .market_store()
+            .curves_map()
+            .get(&5)
+            .unwrap()
+            .discount_factors()
+            .get(9)
+            .unwrap();
         assert!((curve - 0.93006371).abs() < 1e-8);
- 
 
         Ok(())
     }
-
 
     #[test]
     fn test_bootstrapping_solver_run_optimization_updates_discount_factors() -> Result<()> {
@@ -398,13 +504,21 @@ mod tests {
         let inst1 = make_fixed_instruments(ref_date, end_date, 0.0434, Structure::Zero, 5)?;
         engine.add_instrument(5, end_date, Box::new(inst1))?;
 
-        let optimization_orders = vec![vec![(5, 1)]];
+        let optimization_order = vec![vec![(5, 1)]];
         let engine_cell = RefCell::new(engine);
-        let solver = BootstrappingSolver::new(&engine_cell)?;
-        solver.run(optimization_orders)?;
+        let solver =
+            BootstrappingSolver::new(&engine_cell)?.with_optimization_order(optimization_order);
+        solver.run()?;
 
         let binding = engine_cell.borrow();
-        let curve = binding.market_store().curves_map().get(&5).unwrap().discount_factors().get(0).unwrap();
+        let curve = binding
+            .market_store()
+            .curves_map()
+            .get(&5)
+            .unwrap()
+            .discount_factors()
+            .get(0)
+            .unwrap();
         assert!(*curve > 0.0 && *curve <= 1.0);
         Ok(())
     }
@@ -416,10 +530,253 @@ mod tests {
         engine.market_store_mut().add_curve(5, Currency::USD)?;
 
         let engine_cell = RefCell::new(engine);
-        let solver = BootstrappingSolver::new(&engine_cell)?;
         let optimization_orders: Vec<Vec<(usize, usize)>> = vec![];
-        let result = solver.run(optimization_orders);
+        let solver =
+            BootstrappingSolver::new(&engine_cell)?.with_optimization_order(optimization_orders);
+        let result = solver.run();
         assert!(result.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_bootstrapping_engine_run_optimization_by_order_with_id() -> Result<()> {
+        let start_time = Instant::now();
+        let ref_date = Date::new(2025, 7, 18);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let bootstrappingmarketstore = engine.market_store_mut();
+        bootstrappingmarketstore.add_curve(5, Currency::USD)?;
+
+        let end_date = ref_date + Period::new(3, TimeUnit::Days);
+        let inst1 = make_fixed_instruments(ref_date, end_date, 0.0434, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst1))?;
+
+        let end_date = ref_date + Period::new(4, TimeUnit::Days);
+        let inst2 =
+            make_fixed_instruments(ref_date, end_date, 0.0434039240833228, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst2))?;
+
+        let tenor = Period::new(1, TimeUnit::Weeks);
+        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
+
+        let tenor = Period::new(2, TimeUnit::Weeks);
+        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
+
+        let tenor = Period::new(1, TimeUnit::Months);
+        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
+
+        let tenor = Period::new(2, TimeUnit::Months);
+        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
+
+        let tenor = Period::new(3, TimeUnit::Months);
+        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
+
+        let tenor = Period::new(1, TimeUnit::Years);
+        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
+
+        let tenor = Period::new(2, TimeUnit::Years);
+        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
+
+        let tenor = Period::new(3, TimeUnit::Years);
+        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 5)?;
+        engine.add_instrument(5, swap8.accrual_end_date()?, Box::new(swap8))?;
+
+        let tenor = Period::new(4, TimeUnit::Years);
+        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 5)?;
+        engine.add_instrument(5, swap9.accrual_end_date()?, Box::new(swap9))?;
+
+        let optimization_orders = vec![vec![5]];
+
+        let engine_cell = RefCell::new(engine);
+        let bootstrapping_optimization = BootstrappingSolver::new(&engine_cell)?
+            .with_optimization_order_by_curve_id(optimization_orders);
+        bootstrapping_optimization.run()?;
+
+        println!("Bootstrapping optimization completed successfully.");
+        println!("Engine state: {}", engine_cell.borrow());
+
+        let duration = start_time.elapsed();
+        println!("Optimization took {:?}", duration);
+
+        let binding = engine_cell.borrow();
+        let curve = binding
+            .market_store()
+            .curves_map()
+            .get(&5)
+            .unwrap()
+            .discount_factors()
+            .get(9)
+            .unwrap();
+        assert!((curve - 0.93006371).abs() < 1e-8);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_bootstrapping_engine_run_optimization_by_order_with_two_ids() -> Result<()> {
+        let ref_date = Date::new(2025, 7, 18);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let bootstrappingmarketstore = engine.market_store_mut();
+        bootstrappingmarketstore.add_curve(5, Currency::USD)?;
+        bootstrappingmarketstore.add_curve(6, Currency::USD)?;
+
+        let end_date = ref_date + Period::new(3, TimeUnit::Days);
+        let inst1 = make_fixed_instruments(ref_date, end_date, 0.0434, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst1))?;
+
+        let end_date = ref_date + Period::new(4, TimeUnit::Days);
+        let inst2 =
+            make_fixed_instruments(ref_date, end_date, 0.0434039240833228, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst2))?;
+
+        let tenor = Period::new(1, TimeUnit::Weeks);
+        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
+
+        let tenor = Period::new(2, TimeUnit::Weeks);
+        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
+
+        let tenor = Period::new(1, TimeUnit::Months);
+        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
+
+        let tenor = Period::new(2, TimeUnit::Months);
+        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
+
+        let tenor = Period::new(3, TimeUnit::Months);
+        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
+
+        let tenor = Period::new(1, TimeUnit::Years);
+        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
+
+        let tenor = Period::new(2, TimeUnit::Years);
+        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
+
+        let tenor = Period::new(3, TimeUnit::Years);
+        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 6)?;
+        engine.add_instrument(6, swap8.accrual_end_date()?, Box::new(swap8))?;
+
+        let tenor = Period::new(4, TimeUnit::Years);
+        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 6)?;
+        engine.add_instrument(6, swap9.accrual_end_date()?, Box::new(swap9))?;
+
+        let optimization_orders = vec![vec![5, 6]];
+
+        let engine_cell = RefCell::new(engine);
+        let bootstrapping_optimization = BootstrappingSolver::new(&engine_cell)?
+            .with_optimization_order_by_curve_id(optimization_orders);
+
+        let result = bootstrapping_optimization
+            .optimization_order
+            .clone()
+            .unwrap();
+        let expected: Vec<Vec<(usize, usize)>> = vec![vec![
+            (5, 1),
+            (5, 2),
+            (5, 3),
+            (5, 4),
+            (5, 5),
+            (5, 6),
+            (5, 7),
+            (5, 8),
+            (5, 9),
+            (6, 1),
+            (6, 2),
+        ]];
+        assert_eq!(result, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_bootstrapping_engine_run_optimization_by_order_with_two_ids_separate() -> Result<()> {
+        let ref_date = Date::new(2025, 7, 18);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let bootstrappingmarketstore = engine.market_store_mut();
+        bootstrappingmarketstore.add_curve(5, Currency::USD)?;
+        bootstrappingmarketstore.add_curve(6, Currency::USD)?;
+
+        let end_date = ref_date + Period::new(3, TimeUnit::Days);
+        let inst1 = make_fixed_instruments(ref_date, end_date, 0.0434, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst1))?;
+
+        let end_date = ref_date + Period::new(4, TimeUnit::Days);
+        let inst2 =
+            make_fixed_instruments(ref_date, end_date, 0.0434039240833228, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst2))?;
+
+        let tenor = Period::new(1, TimeUnit::Weeks);
+        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
+
+        let tenor = Period::new(2, TimeUnit::Weeks);
+        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
+
+        let tenor = Period::new(1, TimeUnit::Months);
+        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
+
+        let tenor = Period::new(2, TimeUnit::Months);
+        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
+
+        let tenor = Period::new(3, TimeUnit::Months);
+        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
+
+        let tenor = Period::new(1, TimeUnit::Years);
+        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
+
+        let tenor = Period::new(2, TimeUnit::Years);
+        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
+
+        let tenor = Period::new(3, TimeUnit::Years);
+        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 6)?;
+        engine.add_instrument(6, swap8.accrual_end_date()?, Box::new(swap8))?;
+
+        let tenor = Period::new(4, TimeUnit::Years);
+        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 6)?;
+        engine.add_instrument(6, swap9.accrual_end_date()?, Box::new(swap9))?;
+
+        let optimization_orders = vec![vec![5], vec![6]];
+
+        let engine_cell = RefCell::new(engine);
+        let bootstrapping_optimization = BootstrappingSolver::new(&engine_cell)?
+            .with_optimization_order_by_curve_id(optimization_orders);
+
+        let result = bootstrapping_optimization
+            .optimization_order
+            .clone()
+            .unwrap();
+        let expected: Vec<Vec<(usize, usize)>> = vec![
+            vec![
+                (5, 1),
+                (5, 2),
+                (5, 3),
+                (5, 4),
+                (5, 5),
+                (5, 6),
+                (5, 7),
+                (5, 8),
+                (5, 9),
+            ],
+            vec![(6, 1), (6, 2)],
+        ];
+
+        assert_eq!(result, expected);
         Ok(())
     }
 }

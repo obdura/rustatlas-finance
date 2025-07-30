@@ -362,14 +362,63 @@ impl YieldProvider for BootstrappingCurve {
         let comp_factor = discount_factor_to_star / discount_factor_to_end;
         let t = self.day_counter().year_fraction(start_date, end_date);
 
+        
+
+
         if comp_factor <= 0.0 {
             return Ok(0.0);
         }
 
         return Ok(
-            InterestRate::implied_rate(comp_factor, *self.day_counter(), comp, freq, t)?.rate(),
+            implied_rate(comp_factor, *self.day_counter(), comp, freq, t)?.rate(),
         );
     }
+}
+
+
+fn implied_rate(
+    compound: f64,
+    result_dc: DayCounter,
+    comp: Compounding,
+    freq: Frequency,
+    t: f64,
+) -> Result<InterestRate> {
+    let r: f64;
+    let f = freq as i64 as f64;
+    if compound == 1.0 {
+        if t < 0.0 {
+            return Err(AtlasError::InvalidValueErr(
+                "Non-negative time required".to_string(),
+            ));
+        }
+        r = 0.0;
+    } else {
+        if t <= 0.0 {
+            return Err(AtlasError::InvalidValueErr(
+                "Positive time required".to_string(),
+            ));
+        }
+        match comp {
+            Compounding::Simple => r = (compound - 1.0) / t,
+            Compounding::Compounded => r = (compound.powf(1.0 / (f * t)) - 1.0) * f,
+            Compounding::Continuous => r = (compound).ln() / t,
+            Compounding::SimpleThenCompounded => {
+                if t <= 1.0 / f {
+                    r = (compound - 1.0) / t
+                } else {
+                    r = (compound.powf(1.0 / (f * t)) - 1.0) * f
+                }
+            }
+            Compounding::CompoundedThenSimple => {
+                if t > 1.0 / f {
+                    r = (compound - 1.0) / t
+                } else {
+                    r = (compound.powf(1.0 / (f * t)) - 1.0) * f
+                }
+            }
+        }
+    }
+    return Ok(InterestRate::new(r, comp, freq, result_dc));
 }
 
 /// # BootstrappingModel
