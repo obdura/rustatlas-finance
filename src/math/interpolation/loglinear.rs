@@ -157,5 +157,44 @@ mod tests {
         assert!(y1 < y2);
     }
 
+    #[test]
+    fn test_loglinear_interpolation_discount_factors() {
+        let scale = 2.0;
+        let x1 = 186.0;
+        let x2 = 276.0;
+        let x_ = vec![x1, x2];
+        let y1 = 0.976221377455272;
+        let y2 = 0.965549861242730;
+        let y_ = vec![y1, y2];
+        let y = LogLinearInterpolator::interpolate(189.0, &x_, &y_, true).unwrap();
+        assert!((y - 0.975863767225414) * scale < 1e-10);
+    }
+   
+    #[test]
+    fn test_loglinear_left_extrapolation_discount_factors() {
+        let scale = 2.0;
+        let x1 = 186.0;
+        let x2 = 276.0;
+        let x_ = vec![x1, x2];
+        let y1 = 0.976221377455272;
+        let y2 = 0.965549861242730;
+        let y_ = vec![y1, y2];
+        let y = LogLinearInterpolator::interpolate(100.0, &x_, &y_, true).unwrap();
+        assert!((y - 0.986528784052285) * scale < 1e-10);
+    }
+ 
+    #[test]
+    fn test_loglinear_right_extrapolation_discount_factors() {
+        let scale = 2.0;
+        let x1 = 186.0;
+        let x2 = 276.0;
+        let x_ = vec![x1, x2];
+        let y1 = 0.976221377455272;
+        let y2 = 0.965549861242730;
+        let y_ = vec![y1, y2];
+        let y = LogLinearInterpolator::interpolate(369.0, &x_, &y_, true).unwrap();
+        assert!((y - 0.954645165621794) * scale < 1e-10);
+    }
+ 
     
 }
