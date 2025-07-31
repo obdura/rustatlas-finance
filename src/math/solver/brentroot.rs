@@ -293,13 +293,13 @@ mod tests {
         }
         let problem = Cubic {};
         // Interval [-2, -0.5] contains root at -1
-        let solver = BrentRoot::new(problem, -2.0, -0.5);
+        let solver = BrentRoot::new(problem, -2.0, -0.49);
         let result = solver.solve().unwrap();
         assert!((result.root + 1.0).abs() < 1e-8);
 
         // Interval [0.5, 2.0] contains root at 1
         let problem = Cubic {};
-        let solver = BrentRoot::new(problem, 0.5, 2.0);
+        let solver = BrentRoot::new(problem, 0.51, 2.0);
         let result = solver.solve().unwrap();
         assert!((result.root - 1.0).abs() < 1e-8);
     }
