@@ -19,9 +19,7 @@ pub trait Hessian {
 }
 
 pub trait CostFunction {
-    type Param;
-    type Output;
-    fn cost(&self, param: &Self::Param) -> Result<Self::Output>;
+    fn cost(&self, param: &f64) -> Result<f64>;
 }
 
 #[derive(Debug, Error)]
@@ -32,5 +30,7 @@ pub enum SolverError {
     SingularHessian(String),
     #[error("Solver error: {0}")]
     MaxIterationsReached(String),
+    #[error("Solver error: {0}")]
+    BrentRootError(String),
 }
 

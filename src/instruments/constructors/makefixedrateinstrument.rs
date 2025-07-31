@@ -1,26 +1,31 @@
-use argmin::{
-    core::{CostFunction, Error, Executor},
-    solver::brent::BrentRoot,
-};
-
 use std::collections::{HashMap, HashSet};
 
 use crate::{
     cashflows::{
-        cashflow::{Cashflow, CashflowType}, fixedratecoupon::FixedRateCoupon, side::Side, simplecashflow::SimpleCashflow, traits::{InterestAccrual, Payable}
-    }, core::traits::HasCurrency, currencies::enums::Currency, instruments::{loandepos::fixedrateinstrument::FixedRateInstrument, traits::Structure}, rates::interestrate::{InterestRate, RateDefinition}, time::{
+        cashflow::{Cashflow, CashflowType},
+        fixedratecoupon::FixedRateCoupon,
+        side::Side,
+        simplecashflow::SimpleCashflow,
+        traits::{InterestAccrual, Payable},
+    },
+    core::traits::HasCurrency,
+    currencies::enums::Currency,
+    instruments::{loandepos::fixedrateinstrument::FixedRateInstrument, traits::Structure},
+    math::solver::{brentroot::BrentRoot, traits::CostFunction},
+    rates::interestrate::{InterestRate, RateDefinition},
+    time::{
         calendar::Calendar,
         calendars::nullcalendar::NullCalendar,
         date::Date,
         enums::{BusinessDayConvention, DateGenerationRule, Frequency},
         period::Period,
         schedule::MakeSchedule,
-    }, utils::errors::{AtlasError, Result}, visitors::traits::HasCashflows
+    },
+    utils::errors::{AtlasError, Result},
+    visitors::traits::HasCashflows,
 };
 
 use super::traits::{add_cashflows_to_vec, calculate_outstanding, notionals_vector};
-
-
 
 /// # MakeFixedRateInstrument
 /// MakeFixedRateInstrument is a builder for FixedRateInstrument. Uses the builder pattern.
@@ -503,9 +508,9 @@ impl MakeFixedRateInstrument {
                     }
                 };
 
-                let mut dates  = vec![];
+                let mut dates = vec![];
                 match self.redemptions {
-                    Some(redemption) => {    
+                    Some(redemption) => {
                         // disbursements should have only one element
                         let disbursements_dates = self
                             .disbursements
@@ -555,11 +560,8 @@ impl MakeFixedRateInstrument {
                     .notional
                     .ok_or(AtlasError::ValueNotSetErr("Notional".into()))?;
 
-                let redemptions_raw: Vec<f64> = calculate_equal_payment_redemptions(
-                    dates.clone(),
-                    rate,
-                    notional,
-                )?;
+                let redemptions_raw: Vec<f64> =
+                    calculate_equal_payment_redemptions(dates.clone(), rate, notional)?;
 
                 let mut notionals = redemptions_raw.iter().fold(vec![notional], |mut acc, x| {
                     acc.push(acc.last().unwrap() - x);
@@ -568,7 +570,7 @@ impl MakeFixedRateInstrument {
 
                 notionals.pop();
 
-                // create coupon cashflows 
+                // create coupon cashflows
                 let side = self.side.ok_or(AtlasError::ValueNotSetErr("Side".into()))?;
                 build_coupons_from_notionals(
                     &mut cashflows,
@@ -595,15 +597,18 @@ impl MakeFixedRateInstrument {
                 let mut disbursements = vec![];
 
                 let aux_dates: Vec<Date> = dates.iter().skip(1).cloned().collect();
-                aux_dates.iter().zip(redemptions_raw.iter()).for_each(|(date, amount)| {
-                    if *amount >= 0.0 {
-                        redemption_dates.push(*date);
-                        redemptions.push(*amount);
-                    } else {
-                        disbursement_dates.push(*date);
-                        disbursements.push(-*amount);
-                    }
-                });
+                aux_dates
+                    .iter()
+                    .zip(redemptions_raw.iter())
+                    .for_each(|(date, amount)| {
+                        if *amount >= 0.0 {
+                            redemption_dates.push(*date);
+                            redemptions.push(*amount);
+                        } else {
+                            disbursement_dates.push(*date);
+                            disbursements.push(-*amount);
+                        }
+                    });
 
                 add_cashflows_to_vec(
                     &mut cashflows,
@@ -838,7 +843,7 @@ impl MakeFixedRateInstrument {
                     currency,
                     self.discount_curve_id,
                     self.id,
-                    self.issue_date
+                    self.issue_date,
                 ))
             }
         }
@@ -878,9 +883,7 @@ struct EqualPaymentCost {
 }
 
 impl CostFunction for EqualPaymentCost {
-    type Param = f64;
-    type Output = f64;
-    fn cost(&self, payment: &Self::Param) -> std::result::Result<Self::Output, Error> {
+    fn cost(&self, payment: &f64) -> Result<f64> {
         let mut total_amount = 1.0;
         for date_pair in self.dates.windows(2) {
             let d1 = date_pair[0];
@@ -892,7 +895,7 @@ impl CostFunction for EqualPaymentCost {
     }
 }
 
-//  function to calculate equal payment redemptions, always returns a vector of positive values 
+//  function to calculate equal payment redemptions, always returns a vector of positive values
 fn calculate_equal_payment_redemptions(
     dates: Vec<Date>,
     rate: InterestRate,
@@ -902,23 +905,15 @@ fn calculate_equal_payment_redemptions(
         dates: dates.clone(),
         rate: rate,
     };
-    let (min, max) = (-0.2 , 1.5 );
-    let solver = BrentRoot::new(min, max, 1e-6);
+    let (min, max) = (-0.2, 1.5);
 
-    let init_param = 1.0 / (dates.len() as f64);
-    let res = Executor::new(cost, solver)
-        .configure(|state| state.param(init_param).max_iters(100).target_cost(0.0))
-        .run()?;
-
-    let payment = res
-        .state()
-        .best_param
-        .ok_or(AtlasError::EvaluationErr("Solver failed".into()))?
-        * notional;
+    let solver = BrentRoot::new(cost, min, max).with_tolerance(1e-6);
+    let res = solver.solve()?;
+    let payment = res.root * notional;
 
     let mut redemptions = Vec::new();
     let mut total_amount = notional;
-    
+
     for date_pair in dates.windows(2) {
         let d1 = date_pair[0];
         let d2 = date_pair[1];
@@ -952,20 +947,20 @@ impl Into<MakeFixedRateInstrument> for FixedRateInstrument {
             }
         }
         let builder = MakeFixedRateInstrument::new()
-                                                        .with_start_date(self.start_date())
-                                                        .with_end_date(self.end_date())
-                                                        .with_rate(self.rate())
-                                                        .with_notional(self.notional())
-                                                        .with_discount_curve_id(self.discount_curve_id())
-                                                        .with_side(self.side())
-                                                        .with_currency(self.currency().unwrap())
-                                                        .with_disbursements(disbursements)
-                                                        .with_redemptions(redemptions)
-                                                        .with_additional_coupon_dates(additional_coupon_dates)
-                                                        .with_payment_frequency(self.payment_frequency());
+            .with_start_date(self.start_date())
+            .with_end_date(self.end_date())
+            .with_rate(self.rate())
+            .with_notional(self.notional())
+            .with_discount_curve_id(self.discount_curve_id())
+            .with_side(self.side())
+            .with_currency(self.currency().unwrap())
+            .with_disbursements(disbursements)
+            .with_redemptions(redemptions)
+            .with_additional_coupon_dates(additional_coupon_dates)
+            .with_payment_frequency(self.payment_frequency());
         match self.structure() {
             Structure::EqualPayments => builder.equal_payments(),
-            _ => builder.other()
+            _ => builder.other(),
         }
     }
 }
@@ -979,14 +974,20 @@ impl From<&FixedRateInstrument> for MakeFixedRateInstrument {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cashflows::{
-            cashflow::Cashflow, side::Side, traits::Payable
-        }, currencies::enums::Currency, instruments::constructors::makefixedrateinstrument::{calculate_equal_payment_redemptions, MakeFixedRateInstrument}, rates::{enums::Compounding, interestrate::InterestRate}, time::{
+        cashflows::{cashflow::Cashflow, side::Side, traits::Payable},
+        currencies::enums::Currency,
+        instruments::constructors::makefixedrateinstrument::{
+            calculate_equal_payment_redemptions, MakeFixedRateInstrument,
+        },
+        rates::{enums::Compounding, interestrate::InterestRate},
+        time::{
             date::Date,
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }, utils::errors::Result, visitors::traits::HasCashflows
+        },
+        utils::errors::Result,
+        visitors::traits::HasCashflows,
     };
     use std::collections::{HashMap, HashSet};
 
@@ -1048,9 +1049,7 @@ mod tests {
         assert_eq!(instrument.start_date(), start_date);
         assert_eq!(instrument.end_date(), end_date);
 
-        instrument
-            .cashflows()
-            .for_each(|cf| println!("{}", cf));
+        instrument.cashflows().for_each(|cf| println!("{}", cf));
 
         let mut payments = HashMap::new();
         instrument.cashflows().for_each(|cf| match cf {
@@ -1307,11 +1306,13 @@ mod tests {
         assert_eq!(instrument2.payment_frequency(), Frequency::Monthly);
         assert_eq!(instrument2.start_date(), start_date);
         assert_eq!(instrument2.end_date(), end_date);
-        assert_eq!(instrument2.cashflows().count(), instrument.cashflows().count());
+        assert_eq!(
+            instrument2.cashflows().count(),
+            instrument.cashflows().count()
+        );
 
         Ok(())
     }
-
 
     #[test]
     fn into_test_2() -> Result<()> {
@@ -1335,7 +1336,8 @@ mod tests {
             .equal_payments()
             .build()?;
 
-        let builder: MakeFixedRateInstrument = MakeFixedRateInstrument::from(&instrument1).with_rate_value(0.06);
+        let builder: MakeFixedRateInstrument =
+            MakeFixedRateInstrument::from(&instrument1).with_rate_value(0.06);
         let instrument2 = builder.build()?;
 
         assert_eq!(instrument2.notional(), instrument1.notional());
@@ -1379,35 +1381,46 @@ mod tests {
         Ok(())
     }
 
-
     // test section just for equal payment instruments
 
     #[test]
-    fn test_calculate_equal_payment_vector(){
+    fn test_calculate_equal_payment_vector() {
         let notional = 100.0;
         let dates = vec![
-            Date::new(2020, 1, 1), Date::new(2020, 12, 1), Date::new(2021, 1, 1),
-            Date::new(2021, 2, 1), Date::new(2021, 3, 1), Date::new(2021, 4, 1),
-            Date::new(2021, 5, 1), Date::new(2021, 6, 1), Date::new(2021, 7, 1),
-            Date::new(2021, 8, 1), Date::new(2021, 9, 1), Date::new(2021, 10, 1),
-            Date::new(2021, 11, 1), Date::new(2021, 12, 1), Date::new(2022, 1, 1),
-            Date::new(2022, 2, 1), Date::new(2022, 3, 1), Date::new(2022, 4, 1),
+            Date::new(2020, 1, 1),
+            Date::new(2020, 12, 1),
+            Date::new(2021, 1, 1),
+            Date::new(2021, 2, 1),
+            Date::new(2021, 3, 1),
+            Date::new(2021, 4, 1),
+            Date::new(2021, 5, 1),
+            Date::new(2021, 6, 1),
+            Date::new(2021, 7, 1),
+            Date::new(2021, 8, 1),
+            Date::new(2021, 9, 1),
+            Date::new(2021, 10, 1),
+            Date::new(2021, 11, 1),
+            Date::new(2021, 12, 1),
+            Date::new(2022, 1, 1),
+            Date::new(2022, 2, 1),
+            Date::new(2022, 3, 1),
+            Date::new(2022, 4, 1),
             Date::new(2022, 5, 1),
         ];
 
         let rate = InterestRate::new(
-            0.1, 
-            Compounding::Compounded, 
-            Frequency::Annual, 
-            DayCounter::Actual360
+            0.1,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Actual360,
         );
 
-        let redemptions = calculate_equal_payment_redemptions(dates.clone(), rate, notional).unwrap();
+        let redemptions =
+            calculate_equal_payment_redemptions(dates.clone(), rate, notional).unwrap();
 
         assert_eq!(redemptions.len(), dates.len() - 1);
-        assert!(redemptions[0]<0.0);
+        assert!(redemptions[0] < 0.0);
         assert!(redemptions.iter().skip(1).all(|&x| x > 0.0));
-
     }
 
     #[test]
@@ -1435,16 +1448,14 @@ mod tests {
             .equal_payments()
             .build()?;
 
-        instrument.cashflows().for_each(|cf| 
-            assert!(cf.amount().unwrap() > 0.0)
-        );   
+        instrument
+            .cashflows()
+            .for_each(|cf| assert!(cf.amount().unwrap() > 0.0));
 
-        let notional_calc = instrument.cashflows().fold(0.0, |acc, cf| 
-            match cf {
-                Cashflow::Redemption(c) => acc + c.amount().unwrap(),
-                _ => acc
-            }
-        );
+        let notional_calc = instrument.cashflows().fold(0.0, |acc, cf| match cf {
+            Cashflow::Redemption(c) => acc + c.amount().unwrap(),
+            _ => acc,
+        });
 
         assert!(notional_calc > 100.0);
 
@@ -1479,35 +1490,32 @@ mod tests {
 
         instrument.cashflows().for_each(|cf| println!("{}", cf));
 
-        instrument.cashflows().for_each(|cf| 
-            match &cf {
-                Cashflow::Disbursement(c) => assert!(c.amount().unwrap() > 0.0),
-                Cashflow::Redemption(c) => assert!(c.amount().unwrap() > 0.0),
-                _ => ()
-            }  
-        );   
+        instrument.cashflows().for_each(|cf| match &cf {
+            Cashflow::Disbursement(c) => assert!(c.amount().unwrap() > 0.0),
+            Cashflow::Redemption(c) => assert!(c.amount().unwrap() > 0.0),
+            _ => (),
+        });
 
-        let notional_calc = instrument.cashflows().fold(0.0, |acc, cf| 
-            match cf {
-                Cashflow::Redemption(c) => acc + c.amount().unwrap(),
-                _ => acc
-            }
-        );
+        let notional_calc = instrument.cashflows().fold(0.0, |acc, cf| match cf {
+            Cashflow::Redemption(c) => acc + c.amount().unwrap(),
+            _ => acc,
+        });
         assert!(notional_calc > notional);
 
-        let number_of_disbursements = instrument.cashflows().filter(|cf| 
-            match cf {
+        let number_of_disbursements = instrument
+            .cashflows()
+            .filter(|cf| match cf {
                 Cashflow::Disbursement(_) => true,
-                _ => false
-            }
-        ).count();
+                _ => false,
+            })
+            .count();
         assert!(number_of_disbursements > 1);
 
         Ok(())
     }
 
     #[test]
-    fn test_into_equal_payment_with_grace_period() -> Result<()> { 
+    fn test_into_equal_payment_with_grace_period() -> Result<()> {
         let start_date = Date::new(2020, 1, 1);
 
         let rate = InterestRate::new(
@@ -1534,22 +1542,98 @@ mod tests {
         let builder = MakeFixedRateInstrument::from(&instrument_1);
         let instrument_2 = builder.build()?;
 
-        let notional_1 = instrument_1.cashflows().fold(0.0, |acc, cf| 
-            match cf {
-                Cashflow::Redemption(c) => acc + c.amount().unwrap(),
-                _ => acc
-            }
-        );
+        let notional_1 = instrument_1.cashflows().fold(0.0, |acc, cf| match cf {
+            Cashflow::Redemption(c) => acc + c.amount().unwrap(),
+            _ => acc,
+        });
 
-        let notional_2 = instrument_2.cashflows().fold(0.0, |acc, cf| 
-            match cf {
-                Cashflow::Redemption(c) => acc + c.amount().unwrap(),
-                _ => acc
-            }
-        );
-        
-        assert!((notional_1-notional_2).abs() < 1e-6);
+        let notional_2 = instrument_2.cashflows().fold(0.0, |acc, cf| match cf {
+            Cashflow::Redemption(c) => acc + c.amount().unwrap(),
+            _ => acc,
+        });
+
+        assert!((notional_1 - notional_2).abs() < 1e-6);
         Ok(())
     }
-}
 
+        #[test]
+        fn test_calculate_equal_payment_redemptions_zero_rate() {
+            let notional = 1000.0;
+            let dates = vec![
+                Date::new(2023, 1, 1),
+                Date::new(2023, 7, 1),
+                Date::new(2024, 1, 1),
+            ];
+            let rate = InterestRate::new(
+                0.0,
+                Compounding::Compounded,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            );
+            let redemptions = calculate_equal_payment_redemptions(dates.clone(), rate, notional).unwrap();
+            // With zero rate, all payments should be equal and sum to notional
+            assert_eq!(redemptions.len(), 2);
+            let sum: f64 = redemptions.iter().sum();
+            assert!((sum - notional).abs() < 1e-6);
+            assert!((redemptions[0] - redemptions[1]).abs() < 1e-6);
+        }
+
+        #[test]
+        fn test_calculate_equal_payment_redemptions_negative_rate() {
+            let notional = 1000.0;
+            let dates = vec![
+                Date::new(2023, 1, 1),
+                Date::new(2023, 7, 1),
+                Date::new(2024, 1, 1),
+            ];
+            let rate = InterestRate::new(
+                -0.01,
+                Compounding::Compounded,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            );
+            let redemptions = calculate_equal_payment_redemptions(dates.clone(), rate, notional).unwrap();
+            assert_eq!(redemptions.len(), 2);
+            // With negative rate, payments should still sum to notional
+            let sum: f64 = redemptions.iter().sum();
+            assert!((sum - notional).abs() < 1e-6);
+        }
+
+        #[test]
+        fn test_calculate_equal_payment_redemptions_single_period() {
+            let notional = 500.0;
+            let dates = vec![
+                Date::new(2023, 1, 1),
+                Date::new(2024, 1, 1),
+            ];
+            let rate = InterestRate::new(
+                0.05,
+                Compounding::Compounded,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            );
+            let redemptions = calculate_equal_payment_redemptions(dates.clone(), rate, notional).unwrap();
+            assert_eq!(redemptions.len(), 1);
+            // Should be a single payment, close to notional
+            assert!(redemptions[0] > 0.0);
+        }
+
+        #[test]
+        fn test_calculate_equal_payment_redemptions_long_schedule() {
+            let notional = 2000.0;
+            let mut dates = vec![Date::new(2020, 1, 1)];
+            for i in 1..=24 {
+                dates.push(Date::new(2020 + (i / 12), ((i % 12) + 1) as u32, 1u32));
+            }
+            let rate = InterestRate::new(
+                0.07,
+                Compounding::Compounded,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            );
+            let redemptions = calculate_equal_payment_redemptions(dates.clone(), rate, notional).unwrap();
+            assert_eq!(redemptions.len(), dates.len() - 1);
+            // All payments after the first should be positive
+            assert!(redemptions.iter().skip(1).all(|&x| x > 0.0));
+        }
+}
