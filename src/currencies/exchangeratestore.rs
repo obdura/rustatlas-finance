@@ -31,11 +31,20 @@ impl ExchangeRateStore {
     }
 
     pub fn with_exchange_rates(
-        &mut self,
+        mut self,
         exchange_rate_map: HashMap<(Currency, Currency), f64>,
-    ) -> &mut Self {
+    ) -> Self {
         self.exchange_rate_map = exchange_rate_map;
         self
+    }
+
+    pub fn set_exchange_rates(
+        &mut self,
+        exchange_rate_map: HashMap<(Currency, Currency), f64>,
+    ) -> Result<()>
+    {
+        self.exchange_rate_map = exchange_rate_map;
+        Ok(())
     }
 
     pub fn add_exchange_rate(&mut self, currency1: Currency, currency2: Currency, rate: f64) {

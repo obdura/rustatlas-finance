@@ -107,7 +107,10 @@ impl<'a> BootstrappingSolver<'a> {
             .with_tolerance(self.tolerance);
         let res = solver.solve()?;
         let solution = res.solution;
-        println!("\t\t Optimization completed with n iterations: {} and max residual: {:.2e}", res.iterations, res.max_residual);
+        println!(
+            "\t\t Optimization completed with n iterations: {} and max residual: {:.2e}",
+            res.iterations, res.max_residual
+        );
         let mut engine = self.engine.borrow_mut();
         engine.update_discount_factors(solution.as_slice())?;
         Ok(())
@@ -137,8 +140,7 @@ impl<'a> BootstrappingSolver<'a> {
 
     pub fn compute_residuals(&self, discount_factors: &Vec<f64>) -> Result<Vec<f64>> {
         let mut engine = self.engine.borrow_mut();
-        engine
-            .update_discount_factors(discount_factors)?;
+        engine.update_discount_factors(discount_factors)?;
 
         let relevant_instruments = engine.relevant_instruments();
 
@@ -229,9 +231,7 @@ impl<'a> Hessian for &BootstrappingSolver<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cashflows::{side::Side, traits::InterestAccrual},
-        currencies::enums::Currency,
-        instruments::{
+        cashflows::{side::Side, traits::InterestAccrual}, core::marketstore::{MarketStore}, currencies::enums::Currency, instruments::{
             constructors::{
                 makefixedrateinstrument::MakeFixedRateInstrument,
                 makefixedrateleg::MakeFixedRateLeg, makefloatingrateleg::MakeFloatingRateLeg,
@@ -239,19 +239,17 @@ mod tests {
             loandepos::fixedrateinstrument::FixedRateInstrument,
             swaps::vanillairsswap::VanillaIRSSwap,
             traits::Structure,
-        },
-        rates::{
+        }, rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
-        },
-        time::{
+        }, time::{
             calendar::Calendar,
             calendars::unitedstates::UnitedStates,
             date::Date,
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        },
+        }
     };
     use std::time::Instant;
 
@@ -800,6 +798,82 @@ mod tests {
         ];
 
         assert_eq!(result, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_bootstrapping_engine_run_to_market_store() -> Result<()> {
+        let start_time = Instant::now();
+        let ref_date = Date::new(2025, 7, 18);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let bootstrappingmarketstore = engine.market_store_mut();
+        bootstrappingmarketstore.add_curve(5, Currency::USD)?;
+
+        let end_date = ref_date + Period::new(3, TimeUnit::Days);
+        let inst1 = make_fixed_instruments(ref_date, end_date, 0.0434, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst1))?;
+
+        let end_date = ref_date + Period::new(4, TimeUnit::Days);
+        let inst2 =
+            make_fixed_instruments(ref_date, end_date, 0.0434039240833228, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst2))?;
+
+        let tenor = Period::new(1, TimeUnit::Weeks);
+        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
+
+        let tenor = Period::new(2, TimeUnit::Weeks);
+        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
+
+        let tenor = Period::new(1, TimeUnit::Months);
+        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
+
+        let tenor = Period::new(2, TimeUnit::Months);
+        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
+
+        let tenor = Period::new(3, TimeUnit::Months);
+        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
+
+        let tenor = Period::new(1, TimeUnit::Years);
+        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
+
+        let tenor = Period::new(2, TimeUnit::Years);
+        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
+
+        let tenor = Period::new(3, TimeUnit::Years);
+        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 5)?;
+        engine.add_instrument(5, swap8.accrual_end_date()?, Box::new(swap8))?;
+
+        let tenor = Period::new(4, TimeUnit::Years);
+        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 5)?;
+        engine.add_instrument(5, swap9.accrual_end_date()?, Box::new(swap9))?;
+
+        let optimization_orders = vec![vec![5]];
+
+        let engine_cell = RefCell::new(engine);
+        let bootstrapping_optimization = BootstrappingSolver::new(&engine_cell)?
+            .with_optimization_order_by_curve_id(optimization_orders);
+        bootstrapping_optimization.run()?;
+
+        println!("Bootstrapping optimization completed successfully.");
+        println!("Engine state: {}", engine_cell.borrow());
+
+        let duration = start_time.elapsed();
+        println!("Optimization took {:?}", duration);
+
+        let binding = engine_cell.borrow();
+        let marketstore = MarketStore::try_from(binding.market_store())?;
+
+        print!("MarketStore state: {}", marketstore);
+
+        assert!(marketstore.get_index(5).is_ok());
+
         Ok(())
     }
 }

@@ -1,17 +1,23 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use crate::{
-    core::meta::{DiscountFactorRequest, ExchangeRateRequest, ForwardRateRequest, MarketRequest},
-    currencies::enums::Currency,
+    core::{
+        marketstore::MarketStore,
+        meta::{DiscountFactorRequest, ExchangeRateRequest, ForwardRateRequest, MarketRequest},
+    },
+    currencies::{enums::Currency, exchangeratestore::ExchangeRateStore},
     math::interpolation::enums::Interpolator,
     models::traits::Model,
     rates::{
         enums::Compounding,
-        interestrate::InterestRate,
+        indexstore::IndexStore,
+        interestrate::{InterestRate, RateDefinition},
+        interestrateindex::overnightindex::OvernightIndex,
         traits::{HasReferenceDate, YieldProvider},
+        yieldtermstructure::discounttermstructure::DiscountTermStructure,
     },
     time::{date::Date, daycounter::DayCounter, enums::Frequency},
     utils::errors::{AtlasError, Result},
@@ -83,8 +89,12 @@ impl BootstrappingMarketStore {
         self.exchange_rate_map.insert((currency1, currency2), rate);
     }
 
-    pub fn get_exchange_rate_map(&self) -> HashMap<(Currency, Currency), f64> {
-        self.exchange_rate_map.clone()
+    pub fn get_exchange_rate_map(&self) -> &HashMap<(Currency, Currency), f64> {
+        &self.exchange_rate_map
+    }
+
+    pub fn get_currency_curve_map(&self) -> &HashMap<Currency, usize> {
+        &self.currency_curve
     }
 
     pub fn get_exchange_rate(&self, first_ccy: Currency, second_ccy: Currency) -> Result<f64> {
@@ -189,6 +199,64 @@ impl BootstrappingMarketStore {
 
     pub fn curves_map_mut(&mut self) -> &mut HashMap<usize, BootstrappingCurve> {
         &mut self.curves_map
+    }
+}
+
+/// Convert BootstrappingMarketStore to MarketStore
+/// This implementation allows converting a BootstrappingMarketStore into a MarketStore.
+impl TryFrom<&BootstrappingMarketStore> for MarketStore {
+    type Error = AtlasError;
+
+    fn try_from(value: &BootstrappingMarketStore) -> Result<MarketStore> {
+        let ref_date = value.reference_date();
+        let local_currency = value.local_currency();
+
+        // Create a new ExchangeRateStore with the bootstrapping exchange rates
+        let bootstrapping_exchange_rate_map = value.get_exchange_rate_map().clone();
+        let mut new_exchange_rate_store = ExchangeRateStore::new(ref_date);
+        new_exchange_rate_store.set_exchange_rates(bootstrapping_exchange_rate_map)?;
+
+        // Create a new IndexStore with the bootstrapping currency curves
+        let bootstrapping_currency_curve_map = value.get_currency_curve_map().clone();
+        let mut new_index_store = IndexStore::new(ref_date);
+        new_index_store.set_currency_curves(bootstrapping_currency_curve_map)?;
+
+        let bootstrapping_curves_map = value.curves_map();
+        for (id, curve) in bootstrapping_curves_map {
+            let dates = curve.dates().clone();
+            let discount_factors = curve.discount_factors().clone();
+            let day_counter = curve.day_counter().clone();
+            let interpolator = curve.interpolator().clone();
+            let enable_extrapolation = curve.enable_extrapolation();
+            let currency = curve.currency();
+
+            let discount_term_structure = Arc::new(
+                DiscountTermStructure::new(
+                    dates,
+                    discount_factors,
+                    day_counter,
+                    interpolator,
+                    enable_extrapolation,
+                )
+                .unwrap(),
+            );
+
+            let rete_definition = RateDefinition::default();
+            let index = OvernightIndex::new(ref_date)
+                .with_currency(Some(currency))
+                .with_rate_definition(rete_definition)
+                .with_term_structure(discount_term_structure)
+                .with_name(Some(format!("Bootstrapping Curve {}", id)));
+            new_index_store.add_index(*id, Arc::new(RwLock::new(index)))?;
+        }
+
+        let mut market_store = MarketStore::new(ref_date, local_currency);
+        market_store.set_exchange_rate_store(new_exchange_rate_store)?;
+        market_store.set_index_store(new_index_store)?;
+
+
+
+        Ok(market_store)
     }
 }
 
@@ -362,19 +430,13 @@ impl YieldProvider for BootstrappingCurve {
         let comp_factor = discount_factor_to_star / discount_factor_to_end;
         let t = self.day_counter().year_fraction(start_date, end_date);
 
-        
-
-
         if comp_factor <= 0.0 {
             return Ok(0.0);
         }
 
-        return Ok(
-            implied_rate(comp_factor, *self.day_counter(), comp, freq, t)?.rate(),
-        );
+        return Ok(implied_rate(comp_factor, *self.day_counter(), comp, freq, t)?.rate());
     }
 }
-
 
 fn implied_rate(
     compound: f64,
@@ -539,12 +601,11 @@ impl<'a> Model for BootstrappingModel<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        currencies::enums::Currency,
-        rates::{bootstrapping::bootstrappingmarketstore::{
-            BootstrappingCurve, BootstrappingMarketStore,
-        }, traits::YieldProvider},
-        time::date::Date,
-        utils::errors::Result,
+        core::marketstore::MarketStore, currencies::enums::Currency, rates::{
+            bootstrapping::bootstrappingmarketstore::{
+                BootstrappingCurve, BootstrappingMarketStore,
+            }, indexstore::ReadIndex, traits::{HasReferenceDate, YieldProvider}
+        }, time::date::Date, utils::errors::Result
     };
 
     #[test]
@@ -647,7 +708,9 @@ mod tests {
     fn test_exchange_rate_same_currency() {
         let ref_date = Date::new(2022, 1, 1);
         let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
-        let rate = store.get_exchange_rate(Currency::USD, Currency::USD).unwrap();
+        let rate = store
+            .get_exchange_rate(Currency::USD, Currency::USD)
+            .unwrap();
         assert_eq!(rate, 1.0);
     }
 
@@ -656,9 +719,13 @@ mod tests {
         let ref_date = Date::new(2022, 1, 1);
         let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
         store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
-        let rate = store.get_exchange_rate(Currency::USD, Currency::EUR).unwrap();
+        let rate = store
+            .get_exchange_rate(Currency::USD, Currency::EUR)
+            .unwrap();
         assert_eq!(rate, 0.9);
-        let reverse_rate = store.get_exchange_rate(Currency::EUR, Currency::USD).unwrap();
+        let reverse_rate = store
+            .get_exchange_rate(Currency::EUR, Currency::USD)
+            .unwrap();
         assert!((reverse_rate - 1.0 / 0.9).abs() < 1e-12);
     }
 
@@ -668,7 +735,9 @@ mod tests {
         let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
         store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
         store.add_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
-        let rate = store.get_exchange_rate(Currency::USD, Currency::GBP).unwrap();
+        let rate = store
+            .get_exchange_rate(Currency::USD, Currency::GBP)
+            .unwrap();
         assert!((rate - 0.9 * 0.8).abs() < 1e-12);
     }
 
@@ -685,7 +754,9 @@ mod tests {
         let ref_date = Date::new(2022, 1, 1);
         let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
         let date = Date::new(2023, 1, 1);
-        let factor = store.currency_forescast_factor(Currency::USD, Currency::USD, date).unwrap();
+        let factor = store
+            .currency_forescast_factor(Currency::USD, Currency::USD, date)
+            .unwrap();
         assert_eq!(factor, 1.0);
     }
 
@@ -704,11 +775,11 @@ mod tests {
         let mut rates = std::collections::HashMap::new();
         rates.insert((Currency::USD, Currency::EUR), 0.9);
         store.with_exchange_rates(rates.clone());
-        assert_eq!(store.get_exchange_rate_map(), rates);
+        assert_eq!(store.get_exchange_rate_map().clone(), rates);
         let mut new_rates = std::collections::HashMap::new();
         new_rates.insert((Currency::USD, Currency::GBP), 0.8);
         store.with_exchange_rates(new_rates.clone());
-        assert_eq!(store.get_exchange_rate_map(), new_rates);
+        assert_eq!(store.get_exchange_rate_map().clone(), new_rates);
     }
 
     #[test]
@@ -736,7 +807,14 @@ mod tests {
         curve.add_date(date2, 1).unwrap();
         curve.discount_factors_mut()[1] = 0.95;
         curve.discount_factors_mut()[2] = 0.90;
-        let fwd = curve.forward_rate(date1, date2, crate::rates::enums::Compounding::Simple, crate::time::enums::Frequency::Annual).unwrap();
+        let fwd = curve
+            .forward_rate(
+                date1,
+                date2,
+                crate::rates::enums::Compounding::Simple,
+                crate::time::enums::Frequency::Annual,
+            )
+            .unwrap();
         assert!(fwd > 0.0);
     }
 
@@ -747,10 +825,14 @@ mod tests {
         store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
         store.add_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
         // First call populates cache
-        let rate1 = store.get_exchange_rate(Currency::USD, Currency::GBP).unwrap();
+        let rate1 = store
+            .get_exchange_rate(Currency::USD, Currency::GBP)
+            .unwrap();
         // Remove from map to ensure cache is used
         store.exchange_rate_map.clear();
-        let rate2 = store.get_exchange_rate(Currency::USD, Currency::GBP).unwrap();
+        let rate2 = store
+            .get_exchange_rate(Currency::USD, Currency::GBP)
+            .unwrap();
         assert!((rate1 - rate2).abs() < 1e-12);
     }
 
@@ -777,5 +859,48 @@ mod tests {
         assert_eq!(curve.dates, vec![ref_date, date2, date1, date3]);
     }
 
+    #[test]
+    fn test_try_from_bootstrapping_market_store() -> Result<()> {
+        let ref_date = Date::new(2022, 1, 1);
+        let local_currency = Currency::USD;
+        let mut store = BootstrappingMarketStore::new(ref_date, local_currency);
+        store.add_curve(1, Currency::USD)?;
+        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+
+        let market_store: MarketStore = (&store).try_into()?;
+        assert_eq!(market_store.reference_date(), ref_date);
+        assert_eq!(market_store.local_currency(), local_currency);
+        Ok(())
+    }
+
+    #[test]
+    fn test_try_from_bootstrapping_market_store_2() -> Result<()> {
+        let ref_date = Date::new(2022, 1, 1);
+        let local_currency = Currency::USD;
+        let mut store = BootstrappingMarketStore::new(ref_date, local_currency);
+        store.add_curve(1, Currency::USD)?;
+        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+        store.add_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
+
+        let market_store: MarketStore = (&store).try_into()?;
+        assert_eq!(market_store.reference_date(), ref_date);
+        assert_eq!(market_store.local_currency(), local_currency);
+
+        let fx = market_store.exchange_rate_store()
+            .get_exchange_rate(Currency::USD, Currency::EUR)
+            .unwrap();
+    
+        assert!((fx - 0.9).abs() < 1e-12);
+        let fx = market_store.exchange_rate_store()
+            .get_exchange_rate(Currency::EUR, Currency::GBP)
+            .unwrap();
+        assert!((fx - 0.8).abs() < 1e-12);
+
+        let binding = market_store.get_index(1)?;
+        let curve = binding.read_index()?;
+        assert_eq!(curve.currency().unwrap().unwrap(), Currency::USD);
+
+        Ok(())
+    }
 
 }

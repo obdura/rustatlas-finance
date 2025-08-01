@@ -37,6 +37,22 @@ impl IndexStore {
         }
     }
 
+    pub fn set_currency_curves(
+        &mut self,
+        currency_curve: HashMap<Currency, usize>,
+    ) -> Result<()> {
+        self.currency_curve = currency_curve;
+        Ok(())
+    }
+
+    pub fn set_index_map(
+        &mut self,
+        index_map: HashMap<usize, Arc<RwLock<dyn InterestRateIndexTrait>>>,
+    ) -> Result<()> {
+        self.index_map = index_map;
+        Ok(())
+    }
+
     pub fn reference_date(&self) -> Date {
         self.reference_date
     }

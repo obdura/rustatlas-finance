@@ -44,6 +44,33 @@ impl MarketStore {
         }
     }
 
+    pub fn set_exchange_rate_store(
+        &mut self,
+        exchange_rate_store: ExchangeRateStore,
+    ) -> Result<()> {
+        if exchange_rate_store.reference_date() != self.reference_date {
+            return Err(AtlasError::InvalidValueErr(format!(
+                "Exchange rate store reference date {} does not match market store reference date {}",
+                exchange_rate_store.reference_date(),
+                self.reference_date
+            )));
+        }
+        self.exchange_rate_store = exchange_rate_store;
+        Ok(())
+    }
+
+    pub fn set_index_store(&mut self, index_store: IndexStore) -> Result<()> {
+        if index_store.reference_date() != self.reference_date {
+            return Err(AtlasError::InvalidValueErr(format!(
+                "Index store reference date {} does not match market store reference date {}",
+                index_store.reference_date(),
+                self.reference_date
+            )));
+        }
+        self.index_store = index_store;
+        Ok(())
+    }
+
     pub fn local_currency(&self) -> Currency {
         self.local_currency
     }
