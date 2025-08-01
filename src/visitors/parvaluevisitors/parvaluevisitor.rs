@@ -1,8 +1,3 @@
-use argmin::{
-    core::{CostFunction, Error, Executor, State},
-    solver::brent::BrentRoot,
-};
-
 use crate::{
     instruments::{
         loandepos::{
@@ -12,8 +7,9 @@ use crate::{
         swaps::{crosscurrencyswap::CrossCurrencySwap, leg::Leg, vanillairsswap::VanillaIRSSwap},
         traits::Structure,
     },
+    math::solver::{brentroot::BrentRoot, traits::CostFunction},
     rates::interestrate::InterestRate,
-    utils::errors::{AtlasError, Result},
+    utils::errors::Result,
     visitors::{
         npvvisitors::npvconstvisitor::NPVConstVisitor,
         traits::{ConstVisit, Visit},
@@ -24,9 +20,7 @@ use super::traits::{ParValue, ParValueConstVisitor};
 
 // cost function for fixed rate instrument
 impl<'a> CostFunction for ParValue<'a, FixedRateInstrument> {
-    type Param = f64;
-    type Output = f64;
-    fn cost(&self, param: &Self::Param) -> std::result::Result<Self::Output, Error> {
+    fn cost(&self, param: &f64) -> Result<f64> {
         let rate = self.eval.rate();
         let new_rate = InterestRate::new(
             *param,
@@ -39,7 +33,7 @@ impl<'a> CostFunction for ParValue<'a, FixedRateInstrument> {
         let inst = self.eval.clone().set_rate(new_rate)?;
 
         // visit the instrument to calculate the npv and return the result,
-        let npv = self.npv_visitor.visit(&inst).map_err(|e| Error::from(e))?;
+        let npv = self.npv_visitor.visit(&inst)?;
 
         // if the target cost is set, subtract it from the npv
         let target_cost = self.target_cost.unwrap_or(0.0);
@@ -50,9 +44,7 @@ impl<'a> CostFunction for ParValue<'a, FixedRateInstrument> {
 
 // cost function for floating rate instrument
 impl<'a> CostFunction for ParValue<'a, FloatingRateInstrument> {
-    type Param = f64;
-    type Output = f64;
-    fn cost(&self, param: &Self::Param) -> std::result::Result<Self::Output, Error> {
+    fn cost(&self, param: &f64) -> Result<f64> {
         let new_spread = *param;
 
         // new instrument with the new spread
@@ -62,7 +54,7 @@ impl<'a> CostFunction for ParValue<'a, FloatingRateInstrument> {
         let _ = self.fixing_visitor.visit(&mut inst);
 
         // visit the instrument to calculate the npv and return the result
-        let npv = self.npv_visitor.visit(&inst).map_err(|e| Error::from(e))?;
+        let npv = self.npv_visitor.visit(&inst)?;
 
         // if the target cost is set, subtract it from the npv
         let target_cost = self.target_cost.unwrap_or(0.0);
@@ -73,9 +65,7 @@ impl<'a> CostFunction for ParValue<'a, FloatingRateInstrument> {
 
 // cost function for leg
 impl<'a> CostFunction for ParValue<'a, Leg> {
-    type Param = f64;
-    type Output = f64;
-    fn cost(&self, param: &Self::Param) -> std::result::Result<Self::Output, Error> {
+    fn cost(&self, param: &f64) -> Result<f64> {
         let new_rate = *param;
 
         // new instrument with the new spread
@@ -85,7 +75,7 @@ impl<'a> CostFunction for ParValue<'a, Leg> {
         let _ = self.fixing_visitor.visit(&mut inst);
 
         // visit the instrument to calculate the npv and return the npv result
-        let nvp = self.npv_visitor.visit(&inst).map_err(|e| Error::from(e))?;
+        let nvp = self.npv_visitor.visit(&inst)?;
 
         // if the target cost is set, subtract it from the npv
         let target_cost = self.target_cost.unwrap_or(0.0);
@@ -108,16 +98,9 @@ impl<'a> ConstVisit<FixedRateInstrument> for ParValueConstVisitor<'a> {
         let mut cost = ParValue::new(instrument, &self.market_data);
         cost.set_target_cost(self.target_cost.unwrap_or(0.0));
 
-        let solver = BrentRoot::new(min, max, 1e-6);
-        let res = Executor::new(cost, solver)
-            .configure(|state| state.max_iters(100).target_cost(0.0))
-            .run()?;
-
-        let best_param = res.state().get_best_param();
-        match best_param {
-            Some(param) => Ok(*param),
-            None => Err(AtlasError::EvaluationErr("No solution found".to_string())),
-        }
+        let solver = BrentRoot::new(cost, min, max);
+        let res = solver.solve()?;
+        Ok(res.root)
     }
 }
 
@@ -132,16 +115,10 @@ impl<'a> ConstVisit<FloatingRateInstrument> for ParValueConstVisitor<'a> {
         let mut cost = ParValue::new(instrument, &self.market_data);
         cost.set_target_cost(self.target_cost.unwrap_or(0.0));
 
-        let solver = BrentRoot::new(min, max, 1e-6);
-        let res = Executor::new(cost, solver)
-            .configure(|state| state.max_iters(100).target_cost(0.0))
-            .run()?;
+        let solver = BrentRoot::new(cost, min, max);
+        let res = solver.solve()?;
 
-        let best_param = res.state().get_best_param();
-        match best_param {
-            Some(param) => Ok(*param),
-            None => Err(AtlasError::EvaluationErr("No solution found".to_string())),
-        }
+        Ok(res.root)
     }
 }
 
@@ -156,16 +133,9 @@ impl<'a> ConstVisit<Leg> for ParValueConstVisitor<'a> {
         let mut cost = ParValue::new(instrument, &self.market_data);
         cost.set_target_cost(self.target_cost.unwrap_or(0.0));
 
-        let solver = BrentRoot::new(min, max, 1e-6);
-        let res = Executor::new(cost, solver)
-            .configure(|state| state.max_iters(100).target_cost(0.0))
-            .run()?;
-
-        let best_param = res.state().get_best_param();
-        match best_param {
-            Some(param) => Ok(*param),
-            None => Err(AtlasError::EvaluationErr("No solution found".to_string())),
-        }
+        let solver = BrentRoot::new(cost, min, max);
+        let res = solver.solve()?;
+        Ok(res.root)
     }
 }
 
@@ -187,16 +157,9 @@ impl<'a> ConstVisit<VanillaIRSSwap> for ParValueConstVisitor<'a> {
         let mut cost = ParValue::new(second_leg, &self.market_data);
         cost.set_target_cost(target_cost);
 
-        let solver = BrentRoot::new(min, max, 1e-6);
-        let res = Executor::new(cost, solver)
-            .configure(|state| state.max_iters(100).target_cost(0.0))
-            .run()?;
-
-        let best_param = res.state().get_best_param();
-        match best_param {
-            Some(param) => Ok(*param),
-            None => Err(AtlasError::EvaluationErr("No solution found".to_string())),
-        }
+        let solver = BrentRoot::new(cost, min, max);
+        let res = solver.solve()?;
+        Ok(res.root)
     }
 }
 
@@ -219,25 +182,20 @@ impl<'a> ConstVisit<CrossCurrencySwap> for ParValueConstVisitor<'a> {
         let mut cost = ParValue::new_with_local_currency_npv(second_leg, &self.market_data);
         cost.set_target_cost(target_cost);
 
-        let solver = BrentRoot::new(min, max, 1e-6);
-        let res = Executor::new(cost, solver)
-            .configure(|state| state.max_iters(100).target_cost(0.0))
-            .run()?;
-
-        let best_param = res.state().get_best_param();
-        match best_param {
-            Some(param) => Ok(*param),
-            None => Err(AtlasError::EvaluationErr("No solution found".to_string())),
-        }
+        let solver = BrentRoot::new(cost, min, max);
+        let res = solver.solve()?;
+        Ok(res.root)
     }
 }
 #[cfg(test)]
-mod tests{
+mod tests {
     use std::{
         collections::HashMap,
         sync::{Arc, RwLock},
     };
 
+    use super::*;
+    use crate::visitors::indexingvisitors::fixingvisitor::FixingVisitor;
     use crate::{
         cashflows::side::Side,
         core::marketstore::MarketStore,
@@ -265,15 +223,12 @@ mod tests{
     use crate::{
         instruments::{
             constructors::{
-                makefixedrateleg::MakeFixedRateLeg,
-                makefloatingrateleg::MakeFloatingRateLeg,
+                makefixedrateleg::MakeFixedRateLeg, makefloatingrateleg::MakeFloatingRateLeg,
             },
             swaps::vanillairsswap::VanillaIRSSwap,
         },
         visitors::traits::ConstVisit,
     };
-    use super::*;
-    use crate::visitors::indexingvisitors::fixingvisitor::FixingVisitor;
 
     pub fn create_store() -> Result<MarketStore> {
         let ref_date = Date::new(2025, 6, 30);
@@ -570,7 +525,7 @@ mod tests{
         let data = model.gen_market_data(&indexer.request())?;
 
         let par_value_visitor = ParValueConstVisitor::new(&data);
-        
+
         let par_rate = par_value_visitor.visit(&vanillairsswap)?;
 
         assert!(par_rate > -1.0 && par_rate < 1.0);
@@ -634,18 +589,17 @@ mod tests{
         let _ = fixing_visitor.visit(&mut vanillairsswap);
 
         let npv_visitor = NPVConstVisitor::new(&data, true);
-        
+
         let swap_npv = npv_visitor.visit(&vanillairsswap)?;
 
         println!("NPV for vanilla IRS swap: {}", swap_npv);
-        
-        // El NPV debería ser diferente de cero ya que la tasa fija (5%) 
+
+        // El NPV debería ser diferente de cero ya que la tasa fija (5%)
         // probablemente no es la tasa par del mercado
         assert!(swap_npv != 0.0);
 
         Ok(())
     }
-
 
     #[test]
     fn test_par_value_fixed_leg() -> Result<()> {
@@ -682,7 +636,7 @@ mod tests{
         let data = model.gen_market_data(&indexer.request())?;
 
         let par_value_visitor = ParValueConstVisitor::new(&data);
-        
+
         let par_rate = par_value_visitor.visit(&fix_leg)?;
 
         assert!(par_rate > -1.0 && par_rate < 1.0);
@@ -712,7 +666,7 @@ mod tests{
             .with_spread(0.0)
             .with_rate_definition(rate_definition)
             .with_side(Side::Pay)
-            .with_currency(Currency::USD)            
+            .with_currency(Currency::USD)
             .with_discount_curve_id(Some(2))
             .with_forecast_curve_id(Some(0))
             .with_notional(notional)
@@ -727,11 +681,70 @@ mod tests{
         let data = model.gen_market_data(&indexer.request())?;
 
         let par_value_visitor = ParValueConstVisitor::new(&data);
-        
+
         let par_spread = par_value_visitor.visit(&float_leg)?;
 
         assert!(par_spread > -1.0 && par_spread < 1.0);
         println!("Par spread for floating leg: {}", par_spread);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_par_value_cross_currency_swap() -> Result<()> {
+        let market_store = create_store().unwrap();
+        let ref_date = market_store.reference_date();
+
+        let start_date = ref_date;
+        let end_date = start_date + Period::new(2, TimeUnit::Years);
+        let rate_definition = RateDefinition::new(
+            DayCounter::Thirty360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let notional = 100.0;
+
+        let fix_leg = MakeFixedRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_notional(notional)
+            .with_payment_frequency(Frequency::Annual)
+            .with_rate(InterestRate::from_rate_definition(0.03, rate_definition))
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(2))
+            .bullet()
+            .build()
+            .unwrap();
+
+        let float_leg = MakeFloatingRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_payment_frequency(Frequency::Annual)
+            .with_spread(0.0)
+            .with_rate_definition(rate_definition)
+            .with_side(Side::Pay)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(2))
+            .with_forecast_curve_id(Some(0))
+            .with_notional(notional)
+            .bullet()
+            .build()
+            .unwrap();
+
+        let mut cross_currency_swap = CrossCurrencySwap::new(fix_leg, float_leg, Currency::USD)?;
+
+        let indexer = IndexingVisitor::new();
+        indexer.visit(&mut cross_currency_swap)?;
+
+        let model = SimpleModel::new(&market_store);
+        let data = model.gen_market_data(&indexer.request())?;
+
+        let par_value_visitor = ParValueConstVisitor::new(&data);
+
+        let par_rate = par_value_visitor.visit(&cross_currency_swap)?;
+
+        assert!(par_rate > -1.0 && par_rate < 1.0);
 
         Ok(())
     }

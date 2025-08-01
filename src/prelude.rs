@@ -11,7 +11,7 @@ pub use crate::{
         bonds::{fixedratebond::*, traits::*},
         constructors::{
             makedoublerateinstrument::*, makefixedratebond::*, makefixedrateinstrument::*,
-            makefloatingrateinstrument::*, makefloatingrateleg::*, makefixedrateleg::*,
+            makefixedrateleg::*, makefloatingrateinstrument::*, makefloatingrateleg::*,
         },
         loandepos::{
             doublerateinstrument::*, fixedrateinstrument::*, floatingrateinstrument::*,
@@ -20,7 +20,10 @@ pub use crate::{
         swaps::{crosscurrencyswap::*, leg::*, swap::*, vanillairsswap::*},
         traits::*,
     },
-    math::{interpolation::{enums::*, linear::*, loglinear::*, traits::*}, solver::{traits::*, gaussnewton::*}},
+    math::{
+        interpolation::{enums::*, linear::*, loglinear::*, traits::*},
+        solver::{brentopt::*, brentroot::*, gaussnewton::*, newtonraphson::*, traits::*},
+    },
     models::{simplemodel::*, traits::*},
     rates::{
         bootstrapping::{

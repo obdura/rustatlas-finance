@@ -25,8 +25,6 @@ pub enum AtlasError {
     MissingRequiredField(String),
     #[error("Invalid value: {0}")]
     InvalidValueErr(String),
-    #[error("Solver error: {0}")]
-    SolverErr(#[from] argmin::core::Error),
     #[error("{0}")]
     NotImplementedErr(String),
     #[error("Invalid configuration error: {0}")]

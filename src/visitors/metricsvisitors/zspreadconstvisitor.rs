@@ -1,15 +1,11 @@
-use argmin::{
-    core::{CostFunction, Error, Executor, State},
-    solver::brent::BrentOpt,
-};
-
 use crate::{
     cashflows::{cashflow::Cashflow, traits::Payable},
     core::{meta::MarketData, traits::Registrable},
+    math::solver::{brentopt::BrentOpt, traits::CostFunction},
     rates::interestrate::{InterestRate, RateDefinition},
-    utils::errors::{AtlasError, Result}, visitors::traits::{ConstVisit, HasCashflows},
+    utils::errors::{AtlasError, Result},
+    visitors::traits::{ConstVisit, HasCashflows},
 };
-
 
 /// # ZSpreadConstVisitor
 /// ZSpreadConstVisitor is a visitor that calculates the ZSpread of a generic instrument.
@@ -94,10 +90,7 @@ impl<'a, T> CostFunction for SpreadedNPV<'a, T>
 where
     T: HasCashflows,
 {
-    type Param = f64;
-    type Output = f64;
-
-    fn cost(&self, param: &Self::Param) -> std::result::Result<Self::Output, Error> {
+    fn cost(&self, param: &f64) -> Result<f64> {
         let npv = self
             .eval
             .cashflows()
@@ -127,12 +120,10 @@ where
             rate_definition: self.rate_definition,
             target: self.target,
         };
-        let solver = BrentOpt::new(-1.0, 1.0).set_tolerance(1e-6, 1e-6);
-        let res = Executor::new(npv, solver)
-            .configure(|state| state.max_iters(100).target_cost(0.0))
-            .run()?;
+        let solver = BrentOpt::new(npv, -1.0, 1.0);
+        let res = solver.solve()?;
 
-        Ok(*res.state().get_best_param().unwrap())
+        Ok(res.minimum)
     }
 }
 
@@ -142,18 +133,29 @@ mod tests {
     use std::sync::{Arc, RwLock};
 
     use crate::{
-        cashflows::side::Side, core::marketstore::MarketStore, currencies::enums::Currency, instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument, models::{simplemodel::SimpleModel, traits::Model}, rates::{
+        cashflows::side::Side,
+        core::marketstore::MarketStore,
+        currencies::enums::Currency,
+        instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument,
+        models::{simplemodel::SimpleModel, traits::Model},
+        rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
             interestrateindex::iborindex::IborIndex,
             traits::HasReferenceDate,
             yieldtermstructure::flatforwardtermstructure::FlatForwardTermStructure,
-        }, time::{
+        },
+        time::{
             date::Date,
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }, utils::errors::Result, visitors::{indexingvisitors::indexingvisitor::IndexingVisitor, traits::{ConstVisit, Visit}},
+        },
+        utils::errors::Result,
+        visitors::{
+            indexingvisitors::indexingvisitor::IndexingVisitor,
+            traits::{ConstVisit, Visit},
+        },
     };
 
     use super::ZSpreadConstVisitor;
@@ -227,4 +229,6 @@ mod tests {
         println!("ZSpread: {}", zspread * 100.0);
         Ok(())
     }
+
+    
 }

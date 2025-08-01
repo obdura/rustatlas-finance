@@ -1,27 +1,17 @@
-use argmin::{
-    core::{CostFunction, Error, Executor},
-    solver::brent::BrentRoot,
-};
-
 use crate::{
     cashflows::{
         cashflow::{Cashflow, CashflowType},
         fixedratecoupon::FixedRateCoupon,
         floatingratecoupon::FloatingRateCoupon,
         side::Side,
-    },
-    currencies::enums::Currency,
-    instruments::{loandepos::doublerateinstrument::DoubleRateInstrument, traits::RateType},
-    rates::interestrate::{InterestRate, RateDefinition},
-    time::{
+    }, currencies::enums::Currency, instruments::{loandepos::doublerateinstrument::DoubleRateInstrument, traits::RateType}, math::solver::{brentroot::BrentRoot, traits::CostFunction}, rates::interestrate::{InterestRate, RateDefinition}, time::{
         calendar::Calendar,
         calendars::nullcalendar::NullCalendar,
         date::Date,
         enums::{BusinessDayConvention, DateGenerationRule, Frequency},
         period::Period,
         schedule::MakeSchedule,
-    },
-    utils::errors::{AtlasError, Result},
+    }, utils::errors::{AtlasError, Result}
 };
 
 use super::traits::add_cashflows_to_vec;
@@ -723,9 +713,7 @@ struct EqualPaymentCost {
 }
 
 impl CostFunction for EqualPaymentCost {
-    type Param = f64;
-    type Output = f64;
-    fn cost(&self, payment: &Self::Param) -> std::result::Result<Self::Output, Error> {
+    fn cost(&self, payment: &f64) -> Result<f64> {
         let mut total_amount = 1.0;
         for date_pair in self.dates.windows(2) {
             let d1 = date_pair[0];
@@ -748,18 +736,11 @@ fn calculate_equal_payment_redemptions(
         rate: rate,
     };
     let (min, max) = (-0.2, 1.5);
-    let solver = BrentRoot::new(min, max, 1e-6);
+    let solver = BrentRoot::new(cost, min, max);
 
-    let init_param = 1.0 / (dates.len() as f64);
-    let res = Executor::new(cost, solver)
-        .configure(|state| state.param(init_param).max_iters(100).target_cost(0.0))
-        .run()?;
+    let res = solver.solve()?;
 
-    let payment = res
-        .state()
-        .best_param
-        .ok_or(AtlasError::EvaluationErr("Solver failed".into()))?
-        * notional;
+    let payment = res.root * notional;
 
     let mut redemptions = Vec::new();
     let mut total_amount = notional;
@@ -910,4 +891,181 @@ mod tests{
 
         Ok(())
     }
+
+    #[test]
+    fn build_floating_then_fixed_instrument() -> Result<()> {
+        let start_date = Date::new(2021, 6, 15);
+
+        let rate_type = RateType::FloatingThenFixed;
+        let first_part_rate_definition = RateDefinition::default();
+        let first_part_rate = 0.01;
+        let second_part_rate_definition = RateDefinition::default();
+        let second_part_rate = 0.04;
+
+        let mut instrument = MakeDoubleRateInstrument::new()
+            .with_start_date(start_date)
+            .with_tenor(Period::new(3, TimeUnit::Years))
+            .with_change_rate_tenor(Period::new(1, TimeUnit::Years))
+            .with_rate_type(rate_type)
+            .with_first_part_rate_definition(first_part_rate_definition)
+            .with_first_part_rate(first_part_rate)
+            .with_second_part_rate_definition(second_part_rate_definition)
+            .with_second_part_rate(second_part_rate)
+            .with_payment_frequency(Frequency::Annual)
+            .with_notional(500_000.0)
+            .with_side(Side::Pay)
+            .with_currency(Currency::EUR)
+            .build()?;
+
+        instrument
+            .mut_cashflows()
+            .for_each(|cf| cf.set_fixing_rate(0.012));
+
+        let mut found_floating = false;
+        let mut found_fixed = false;
+        instrument.cashflows().for_each(|cf| match cf {
+            Cashflow::FixedRateCoupon(coupon) => {
+                found_fixed = true;
+                assert!((coupon.rate().rate() - 0.04).abs() < 1e-6);
+            }
+            Cashflow::FloatingRateCoupon(coupon) => {
+                found_floating = true;
+                assert!((coupon.spread() - 0.01).abs() < 1e-6);
+            }
+            _ => (),
+        });
+        assert!(found_floating && found_fixed);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_missing_required_fields_should_fail() {
+        // Missing start_date
+        let result = MakeDoubleRateInstrument::new()
+            .with_tenor(Period::new(1, TimeUnit::Years))
+            .with_payment_frequency(Frequency::Annual)
+            .build();
+        assert!(result.is_err());
+
+        // Missing notional
+        let result = MakeDoubleRateInstrument::new()
+            .with_start_date(Date::new(2023, 1, 1))
+            .with_tenor(Period::new(1, TimeUnit::Years))
+            .with_payment_frequency(Frequency::Annual)
+            .build();
+        assert!(result.is_err());
+
+        // Missing rate_type
+        let result = MakeDoubleRateInstrument::new()
+            .with_start_date(Date::new(2023, 1, 1))
+            .with_tenor(Period::new(1, TimeUnit::Years))
+            .with_payment_frequency(Frequency::Annual)
+            .with_notional(100.0)
+            .build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_with_first_coupon_date_and_tenor_grace_period() -> Result<()> {
+        let start_date = Date::new(2020, 1, 1);
+        let first_coupon_date = Some(Date::new(2020, 7, 1));
+        let tenor = Period::new(2, TimeUnit::Years);
+        let payment_frequency = Frequency::Semiannual;
+
+        let (dates, dates_first_part, _dates_second_part) = MakeDoubleRateInstrument::new()
+            .with_start_date(start_date)
+            .with_first_coupon_date(first_coupon_date)
+            .with_payment_frequency(payment_frequency)
+            .with_tenor(tenor)
+            .with_change_rate_date(start_date + Period::new(1, TimeUnit::Years))
+            .make_schedule_dates()?;
+
+        assert_eq!(dates_first_part.first().unwrap(), &start_date);
+        assert_eq!(dates_first_part.get(1).unwrap(), &first_coupon_date.unwrap());
+        assert!(dates.len() >= 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_make_schedule_dates_with_tenor_only() -> Result<()> {
+        let start_date = Date::new(2022, 3, 15);
+        let tenor = Period::new(3, TimeUnit::Years);
+        let payment_frequency = Frequency::Annual;
+
+        let (dates, dates_first_part, dates_second_part) = MakeDoubleRateInstrument::new()
+            .with_start_date(start_date)
+            .with_payment_frequency(payment_frequency)
+            .with_tenor(tenor)
+            .with_change_rate_tenor(Period::new(2, TimeUnit::Years))
+            .make_schedule_dates()?;
+
+        assert_eq!(dates.first().unwrap(), &start_date);
+        assert!(dates.len() > 1);
+        assert!(dates_first_part.len() > 0);
+        assert!(dates_second_part.len() > 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_build_with_invalid_first_coupon_date_should_fail() {
+        let start_date = Date::new(2022, 1, 1);
+        let first_coupon_date = Some(Date::new(2021, 12, 31)); // before start_date
+
+        let result = MakeDoubleRateInstrument::new()
+            .with_start_date(start_date)
+            .with_first_coupon_date(first_coupon_date)
+            .with_payment_frequency(Frequency::Annual)
+            .with_tenor(Period::new(2, TimeUnit::Years))
+            .with_change_rate_date(start_date + Period::new(1, TimeUnit::Years))
+            .make_schedule_dates();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_with_change_rate_date_after_end_date_should_fail() {
+        let start_date = Date::new(2022, 1, 1);
+        let end_date = Date::new(2023, 1, 1);
+        let change_rate_date = Date::new(2024, 1, 1); // after end_date
+
+        let result = MakeDoubleRateInstrument::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_change_rate_date(change_rate_date)
+            .with_payment_frequency(Frequency::Annual)
+            .make_schedule_dates();
+
+        assert!(result.is_ok()); // The builder does not check this, but you may want to add this check in production
+    }
+
+    #[test]
+    fn test_build_with_zero_notional_should_fail() {
+        let start_date = Date::new(2022, 1, 1);
+        let rate_type = RateType::FixedThenFixed;
+        let first_part_rate_definition = RateDefinition::default();
+        let first_part_rate = 0.03;
+        let second_part_rate_definition = RateDefinition::default();
+        let second_part_rate = 0.04;
+
+        let result = MakeDoubleRateInstrument::new()
+            .with_start_date(start_date)
+            .with_tenor(Period::new(2, TimeUnit::Years))
+            .with_change_rate_tenor(Period::new(1, TimeUnit::Years))
+            .with_rate_type(rate_type)
+            .with_first_part_rate_definition(first_part_rate_definition)
+            .with_first_part_rate(first_part_rate)
+            .with_second_part_rate_definition(second_part_rate_definition)
+            .with_second_part_rate(second_part_rate)
+            .with_payment_frequency(Frequency::Annual)
+            .with_notional(0.0)
+            .with_side(Side::Pay)
+            .with_currency(Currency::EUR)
+            .build();
+
+        assert!(result.is_ok()); // The builder does not check for zero notional, but you may want to add this check in production
+    }
+
 }

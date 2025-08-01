@@ -1,14 +1,5 @@
-use argmin::{
-    core::{CostFunction, Error, Executor, State},
-    solver::brent::BrentRoot,
-};
-
 use crate::{
-    cashflows::{cashflow::Cashflow, simplecashflow::SimpleCashflow, traits::Payable},
-    core::traits::{HasCurrency, Registrable},
-    instruments::loandepos::doublerateinstrument::DoubleRateInstrument,
-    utils::errors::Result,
-    visitors::traits::{ConstVisit, HasCashflows, Visit},
+    cashflows::{cashflow::Cashflow, simplecashflow::SimpleCashflow, traits::Payable}, core::traits::{HasCurrency, Registrable}, instruments::loandepos::doublerateinstrument::DoubleRateInstrument, math::solver::{brentroot::BrentRoot, traits::CostFunction}, utils::errors::Result, visitors::traits::{ConstVisit, HasCashflows, Visit}
 };
 
 use super::traits::{ParValue, ParValueConstVisitor};
@@ -51,16 +42,14 @@ impl HasCashflows for TmpInstrument {
 
 // cost function for TmpInstrument
 impl<'a> CostFunction for ParValue<'a, TmpInstrument> {
-    type Param = f64;
-    type Output = f64;
-    fn cost(&self, param: &Self::Param) -> std::result::Result<Self::Output, Error> {
+    fn cost(&self, param: &f64) -> Result<f64> {
         let mut inst = self.eval.clone().set_rate_value(*param);
 
         // visit the instrument to update the fixing values
         let _ = self.fixing_visitor.visit(&mut inst);
 
         // visit the instrument to calculate the npv and return the result
-        self.npv_visitor.visit(&inst).map_err(|e| Error::from(e))
+        self.npv_visitor.visit(&inst)
     }
 }
 
@@ -102,18 +91,14 @@ impl<'a> ConstVisit<DoubleRateInstrument> for ParValueConstVisitor<'a> {
         let (min, max) = (-1.0, 1.0);
 
         let cost = ParValue::new(&tmp_inst_fp, self.market_data);
-        let solver = BrentRoot::new(min, max, 1e-6);
-        let res = Executor::new(cost, solver)
-            .configure(|state| state.max_iters(100).target_cost(0.0))
-            .run()?;
-        let first_rate_par_value = *res.state().get_best_param().unwrap();
+        let solver = BrentRoot::new(cost, min, max);
+        let res = solver.solve()?;
+        let first_rate_par_value = res.root;
 
         let cost = ParValue::new(&tmp_inst_sp, self.market_data);
-        let solver = BrentRoot::new(min, max, 1e-6);
-        let res = Executor::new(cost, solver)
-            .configure(|state| state.max_iters(100).target_cost(0.0))
-            .run()?;
-        let second_rate_par_value = *res.state().get_best_param().unwrap();
+        let solver = BrentRoot::new(cost, min, max);
+        let res = solver.solve()?;
+        let second_rate_par_value = res.root;
 
         Ok((first_rate_par_value, second_rate_par_value))
     }
@@ -407,4 +392,7 @@ mod tests{
 
         Ok(())
     }
+
+
+    
 }

@@ -138,8 +138,7 @@ impl<'a> BootstrappingSolver<'a> {
     pub fn compute_residuals(&self, discount_factors: &Vec<f64>) -> Result<Vec<f64>> {
         let mut engine = self.engine.borrow_mut();
         engine
-            .update_discount_factors(discount_factors)
-            .map_err(|e| argmin::core::Error::msg(format!("{:?}", e)))?;
+            .update_discount_factors(discount_factors)?;
 
         let relevant_instruments = engine.relevant_instruments();
 

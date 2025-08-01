@@ -1,26 +1,33 @@
-use argmin::{
-    core::{CostFunction, Error, Executor},
-    solver::brent::BrentRoot,
-};
-
 use std::collections::{HashMap, HashSet};
 
 use crate::{
     cashflows::{
-        cashflow::{Cashflow, CashflowType}, fixedratecoupon::FixedRateCoupon, side::Side, simplecashflow::SimpleCashflow, traits::{InterestAccrual, Payable}
-    }, core::traits::HasCurrency, currencies::enums::Currency, instruments::{bonds::fixedratebond::FixedRateBond, traits::Structure}, rates::interestrate::{InterestRate, RateDefinition}, time::{
+        cashflow::{Cashflow, CashflowType},
+        fixedratecoupon::FixedRateCoupon,
+        side::Side,
+        simplecashflow::SimpleCashflow,
+        traits::{InterestAccrual, Payable},
+    },
+    core::traits::HasCurrency,
+    currencies::enums::Currency,
+    instruments::{bonds::fixedratebond::FixedRateBond, traits::Structure},
+    math::{
+        solver::{brentroot::BrentRoot, traits::CostFunction},
+    },
+    rates::interestrate::{InterestRate, RateDefinition},
+    time::{
         calendar::Calendar,
         calendars::nullcalendar::NullCalendar,
         date::Date,
         enums::{BusinessDayConvention, DateGenerationRule, Frequency},
         period::Period,
         schedule::MakeSchedule,
-    }, utils::errors::{AtlasError, Result}, visitors::traits::HasCashflows
+    },
+    utils::errors::{AtlasError, Result},
+    visitors::traits::HasCashflows,
 };
 
 use super::traits::{add_cashflows_to_vec, calculate_outstanding, notionals_vector};
-
-
 
 /// # MakeFixedRateBond
 /// MakeFixedRateBond is a builder for FixedRateBond. Uses the builder pattern.
@@ -91,10 +98,7 @@ impl MakeFixedRateBond {
     }
 
     /// Sets the first coupon date.
-    pub fn with_first_coupon_date(
-        mut self,
-        first_coupon_date: Option<Date>,
-    ) -> MakeFixedRateBond {
+    pub fn with_first_coupon_date(mut self, first_coupon_date: Option<Date>) -> MakeFixedRateBond {
         self.first_coupon_date = first_coupon_date;
         self
     }
@@ -162,10 +166,7 @@ impl MakeFixedRateBond {
     }
 
     /// Sets the rate definition.
-    pub fn with_rate_definition(
-        mut self,
-        rate_definition: RateDefinition,
-    ) -> MakeFixedRateBond {
+    pub fn with_rate_definition(mut self, rate_definition: RateDefinition) -> MakeFixedRateBond {
         self.rate_definition = Some(rate_definition);
         match self.rate_value {
             Some(rate_value) => {
@@ -231,10 +232,7 @@ impl MakeFixedRateBond {
     }
 
     /// Sets the disbursements.
-    pub fn with_disbursements(
-        mut self,
-        disbursements: HashMap<Date, f64>,
-    ) -> MakeFixedRateBond {
+    pub fn with_disbursements(mut self, disbursements: HashMap<Date, f64>) -> MakeFixedRateBond {
         self.disbursements = Some(disbursements);
         self
     }
@@ -436,7 +434,6 @@ impl MakeFixedRateBond {
                     self.issue_date,
                     self.yield_rate,
                     self.purchase_date,
-                    
                 ))
             }
             Structure::Other => {
@@ -531,9 +528,9 @@ impl MakeFixedRateBond {
                     }
                 };
 
-                let mut dates  = vec![];
+                let mut dates = vec![];
                 match self.redemptions {
-                    Some(redemption) => {    
+                    Some(redemption) => {
                         // disbursements should have only one element
                         let disbursements_dates = self
                             .disbursements
@@ -583,11 +580,8 @@ impl MakeFixedRateBond {
                     .notional
                     .ok_or(AtlasError::ValueNotSetErr("Notional".into()))?;
 
-                let redemptions_raw: Vec<f64> = calculate_equal_payment_redemptions(
-                    dates.clone(),
-                    rate,
-                    notional,
-                )?;
+                let redemptions_raw: Vec<f64> =
+                    calculate_equal_payment_redemptions(dates.clone(), rate, notional)?;
 
                 let mut notionals = redemptions_raw.iter().fold(vec![notional], |mut acc, x| {
                     acc.push(acc.last().unwrap() - x);
@@ -596,7 +590,7 @@ impl MakeFixedRateBond {
 
                 notionals.pop();
 
-                // create coupon cashflows 
+                // create coupon cashflows
                 let side = self.side.ok_or(AtlasError::ValueNotSetErr("Side".into()))?;
                 build_coupons_from_notionals(
                     &mut cashflows,
@@ -623,15 +617,18 @@ impl MakeFixedRateBond {
                 let mut disbursements = vec![];
 
                 let aux_dates: Vec<Date> = dates.iter().skip(1).cloned().collect();
-                aux_dates.iter().zip(redemptions_raw.iter()).for_each(|(date, amount)| {
-                    if *amount >= 0.0 {
-                        redemption_dates.push(*date);
-                        redemptions.push(*amount);
-                    } else {
-                        disbursement_dates.push(*date);
-                        disbursements.push(-*amount);
-                    }
-                });
+                aux_dates
+                    .iter()
+                    .zip(redemptions_raw.iter())
+                    .for_each(|(date, amount)| {
+                        if *amount >= 0.0 {
+                            redemption_dates.push(*date);
+                            redemptions.push(*amount);
+                        } else {
+                            disbursement_dates.push(*date);
+                            disbursements.push(-*amount);
+                        }
+                    });
 
                 add_cashflows_to_vec(
                     &mut cashflows,
@@ -915,9 +912,7 @@ struct EqualPaymentCost {
 }
 
 impl CostFunction for EqualPaymentCost {
-    type Param = f64;
-    type Output = f64;
-    fn cost(&self, payment: &Self::Param) -> std::result::Result<Self::Output, Error> {
+    fn cost(&self, payment: &f64) -> Result<f64> {
         let mut total_amount = 1.0;
         for date_pair in self.dates.windows(2) {
             let d1 = date_pair[0];
@@ -929,7 +924,7 @@ impl CostFunction for EqualPaymentCost {
     }
 }
 
-//  function to calculate equal payment redemptions, always returns a vector of positive values 
+//  function to calculate equal payment redemptions, always returns a vector of positive values
 fn calculate_equal_payment_redemptions(
     dates: Vec<Date>,
     rate: InterestRate,
@@ -939,23 +934,16 @@ fn calculate_equal_payment_redemptions(
         dates: dates.clone(),
         rate: rate,
     };
-    let (min, max) = (-0.2 , 1.5 );
-    let solver = BrentRoot::new(min, max, 1e-6);
+    let (min, max) = (-0.2, 1.5);
+    let solver = BrentRoot::new(cost, min, max);
 
-    let init_param = 1.0 / (dates.len() as f64);
-    let res = Executor::new(cost, solver)
-        .configure(|state| state.param(init_param).max_iters(100).target_cost(0.0))
-        .run()?;
+    let res = solver.solve()?;
 
-    let payment = res
-        .state()
-        .best_param
-        .ok_or(AtlasError::EvaluationErr("Solver failed".into()))?
-        * notional;
+    let payment = res.root * notional;
 
     let mut redemptions = Vec::new();
     let mut total_amount = notional;
-    
+
     for date_pair in dates.windows(2) {
         let d1 = date_pair[0];
         let d2 = date_pair[1];
@@ -989,20 +977,20 @@ impl Into<MakeFixedRateBond> for FixedRateBond {
             }
         }
         let builder = MakeFixedRateBond::new()
-                                                        .with_start_date(self.start_date())
-                                                        .with_end_date(self.end_date())
-                                                        .with_rate(self.rate())
-                                                        .with_notional(self.notional())
-                                                        .with_discount_curve_id(self.discount_curve_id())
-                                                        .with_side(self.side())
-                                                        .with_currency(self.currency().unwrap())
-                                                        .with_disbursements(disbursements)
-                                                        .with_redemptions(redemptions)
-                                                        .with_additional_coupon_dates(additional_coupon_dates)
-                                                        .with_payment_frequency(self.payment_frequency());
+            .with_start_date(self.start_date())
+            .with_end_date(self.end_date())
+            .with_rate(self.rate())
+            .with_notional(self.notional())
+            .with_discount_curve_id(self.discount_curve_id())
+            .with_side(self.side())
+            .with_currency(self.currency().unwrap())
+            .with_disbursements(disbursements)
+            .with_redemptions(redemptions)
+            .with_additional_coupon_dates(additional_coupon_dates)
+            .with_payment_frequency(self.payment_frequency());
         match self.structure() {
             Structure::EqualPayments => builder.equal_payments(),
-            _ => builder.other()
+            _ => builder.other(),
         }
     }
 }
@@ -1016,14 +1004,20 @@ impl From<&FixedRateBond> for MakeFixedRateBond {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cashflows::{
-            cashflow::Cashflow, side::Side, traits::Payable
-        }, currencies::enums::Currency, instruments::constructors::makefixedratebond::{calculate_equal_payment_redemptions, MakeFixedRateBond}, rates::{enums::Compounding, interestrate::InterestRate}, time::{
+        cashflows::{cashflow::Cashflow, side::Side, traits::Payable},
+        currencies::enums::Currency,
+        instruments::constructors::makefixedratebond::{
+            calculate_equal_payment_redemptions, MakeFixedRateBond,
+        },
+        rates::{enums::Compounding, interestrate::InterestRate},
+        time::{
             date::Date,
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }, utils::errors::Result, visitors::traits::HasCashflows
+        },
+        utils::errors::Result,
+        visitors::traits::HasCashflows,
     };
     use std::collections::{HashMap, HashSet};
 
@@ -1085,9 +1079,7 @@ mod tests {
         assert_eq!(instrument.start_date(), start_date);
         assert_eq!(instrument.end_date(), end_date);
 
-        instrument
-            .cashflows()
-            .for_each(|cf| println!("{}", cf));
+        instrument.cashflows().for_each(|cf| println!("{}", cf));
 
         let mut payments = HashMap::new();
         instrument.cashflows().for_each(|cf| match cf {
@@ -1344,11 +1336,13 @@ mod tests {
         assert_eq!(instrument2.payment_frequency(), Frequency::Monthly);
         assert_eq!(instrument2.start_date(), start_date);
         assert_eq!(instrument2.end_date(), end_date);
-        assert_eq!(instrument2.cashflows().count(), instrument.cashflows().count());
+        assert_eq!(
+            instrument2.cashflows().count(),
+            instrument.cashflows().count()
+        );
 
         Ok(())
     }
-
 
     #[test]
     fn into_test_2() -> Result<()> {
@@ -1372,7 +1366,8 @@ mod tests {
             .equal_payments()
             .build()?;
 
-        let builder: MakeFixedRateBond = MakeFixedRateBond::from(&instrument1).with_rate_value(0.06);
+        let builder: MakeFixedRateBond =
+            MakeFixedRateBond::from(&instrument1).with_rate_value(0.06);
         let instrument2 = builder.build()?;
 
         assert_eq!(instrument2.notional(), instrument1.notional());
@@ -1416,35 +1411,46 @@ mod tests {
         Ok(())
     }
 
-
     // test section just for equal payment instruments
 
     #[test]
-    fn test_calculate_equal_payment_vector(){
+    fn test_calculate_equal_payment_vector() {
         let notional = 100.0;
         let dates = vec![
-            Date::new(2020, 1, 1), Date::new(2020, 12, 1), Date::new(2021, 1, 1),
-            Date::new(2021, 2, 1), Date::new(2021, 3, 1), Date::new(2021, 4, 1),
-            Date::new(2021, 5, 1), Date::new(2021, 6, 1), Date::new(2021, 7, 1),
-            Date::new(2021, 8, 1), Date::new(2021, 9, 1), Date::new(2021, 10, 1),
-            Date::new(2021, 11, 1), Date::new(2021, 12, 1), Date::new(2022, 1, 1),
-            Date::new(2022, 2, 1), Date::new(2022, 3, 1), Date::new(2022, 4, 1),
+            Date::new(2020, 1, 1),
+            Date::new(2020, 12, 1),
+            Date::new(2021, 1, 1),
+            Date::new(2021, 2, 1),
+            Date::new(2021, 3, 1),
+            Date::new(2021, 4, 1),
+            Date::new(2021, 5, 1),
+            Date::new(2021, 6, 1),
+            Date::new(2021, 7, 1),
+            Date::new(2021, 8, 1),
+            Date::new(2021, 9, 1),
+            Date::new(2021, 10, 1),
+            Date::new(2021, 11, 1),
+            Date::new(2021, 12, 1),
+            Date::new(2022, 1, 1),
+            Date::new(2022, 2, 1),
+            Date::new(2022, 3, 1),
+            Date::new(2022, 4, 1),
             Date::new(2022, 5, 1),
         ];
 
         let rate = InterestRate::new(
-            0.1, 
-            Compounding::Compounded, 
-            Frequency::Annual, 
-            DayCounter::Actual360
+            0.1,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Actual360,
         );
 
-        let redemptions = calculate_equal_payment_redemptions(dates.clone(), rate, notional).unwrap();
+        let redemptions =
+            calculate_equal_payment_redemptions(dates.clone(), rate, notional).unwrap();
 
         assert_eq!(redemptions.len(), dates.len() - 1);
-        assert!(redemptions[0]<0.0);
+        assert!(redemptions[0] < 0.0);
         assert!(redemptions.iter().skip(1).all(|&x| x > 0.0));
-
     }
 
     #[test]
@@ -1472,16 +1478,14 @@ mod tests {
             .equal_payments()
             .build()?;
 
-        instrument.cashflows().for_each(|cf| 
-            assert!(cf.amount().unwrap() > 0.0)
-        );   
+        instrument
+            .cashflows()
+            .for_each(|cf| assert!(cf.amount().unwrap() > 0.0));
 
-        let notional_calc = instrument.cashflows().fold(0.0, |acc, cf| 
-            match cf {
-                Cashflow::Redemption(c) => acc + c.amount().unwrap(),
-                _ => acc
-            }
-        );
+        let notional_calc = instrument.cashflows().fold(0.0, |acc, cf| match cf {
+            Cashflow::Redemption(c) => acc + c.amount().unwrap(),
+            _ => acc,
+        });
 
         assert!(notional_calc > 100.0);
 
@@ -1516,35 +1520,32 @@ mod tests {
 
         instrument.cashflows().for_each(|cf| println!("{}", cf));
 
-        instrument.cashflows().for_each(|cf| 
-            match &cf {
-                Cashflow::Disbursement(c) => assert!(c.amount().unwrap() > 0.0),
-                Cashflow::Redemption(c) => assert!(c.amount().unwrap() > 0.0),
-                _ => ()
-            }  
-        );   
+        instrument.cashflows().for_each(|cf| match &cf {
+            Cashflow::Disbursement(c) => assert!(c.amount().unwrap() > 0.0),
+            Cashflow::Redemption(c) => assert!(c.amount().unwrap() > 0.0),
+            _ => (),
+        });
 
-        let notional_calc = instrument.cashflows().fold(0.0, |acc, cf| 
-            match cf {
-                Cashflow::Redemption(c) => acc + c.amount().unwrap(),
-                _ => acc
-            }
-        );
+        let notional_calc = instrument.cashflows().fold(0.0, |acc, cf| match cf {
+            Cashflow::Redemption(c) => acc + c.amount().unwrap(),
+            _ => acc,
+        });
         assert!(notional_calc > notional);
 
-        let number_of_disbursements = instrument.cashflows().filter(|cf| 
-            match cf {
+        let number_of_disbursements = instrument
+            .cashflows()
+            .filter(|cf| match cf {
                 Cashflow::Disbursement(_) => true,
-                _ => false
-            }
-        ).count();
+                _ => false,
+            })
+            .count();
         assert!(number_of_disbursements > 1);
 
         Ok(())
     }
 
     #[test]
-    fn test_into_equal_payment_with_grace_period() -> Result<()> { 
+    fn test_into_equal_payment_with_grace_period() -> Result<()> {
         let start_date = Date::new(2020, 1, 1);
 
         let rate = InterestRate::new(
@@ -1571,22 +1572,175 @@ mod tests {
         let builder = MakeFixedRateBond::from(&instrument_1);
         let instrument_2 = builder.build()?;
 
-        let notional_1 = instrument_1.cashflows().fold(0.0, |acc, cf| 
-            match cf {
-                Cashflow::Redemption(c) => acc + c.amount().unwrap(),
-                _ => acc
-            }
-        );
+        let notional_1 = instrument_1.cashflows().fold(0.0, |acc, cf| match cf {
+            Cashflow::Redemption(c) => acc + c.amount().unwrap(),
+            _ => acc,
+        });
 
-        let notional_2 = instrument_2.cashflows().fold(0.0, |acc, cf| 
-            match cf {
-                Cashflow::Redemption(c) => acc + c.amount().unwrap(),
-                _ => acc
-            }
-        );
-        
-        assert!((notional_1-notional_2).abs() < 1e-6);
+        let notional_2 = instrument_2.cashflows().fold(0.0, |acc, cf| match cf {
+            Cashflow::Redemption(c) => acc + c.amount().unwrap(),
+            _ => acc,
+        });
+
+        assert!((notional_1 - notional_2).abs() < 1e-6);
         Ok(())
     }
-}
 
+    #[test]
+    fn build_bullet_with_tenor() -> Result<()> {
+        let start_date = Date::new(2021, 6, 15);
+        let tenor = Period::new(3, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.03,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        );
+        let notional = 500.0;
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_tenor(tenor)
+            .with_payment_frequency(Frequency::Annual)
+            .with_rate(rate)
+            .with_notional(notional)
+            .with_side(Side::Pay)
+            .with_currency(Currency::EUR)
+            .bullet()
+            .build()?;
+
+        assert_eq!(instrument.notional(), notional);
+        assert_eq!(instrument.rate(), rate);
+        assert_eq!(instrument.payment_frequency(), Frequency::Annual);
+        assert_eq!(instrument.start_date(), start_date);
+        assert_eq!(instrument.end_date(), start_date + tenor);
+        Ok(())
+    }
+
+    #[test]
+    fn build_other_with_multiple_disbursements_and_redemptions() -> Result<()> {
+        let start_date = Date::new(2022, 1, 1);
+        let end_date = start_date + Period::new(2, TimeUnit::Years);
+
+        let mut disbursements = HashMap::new();
+        disbursements.insert(start_date, 60.0);
+        disbursements.insert(start_date + Period::new(1, TimeUnit::Years), 40.0);
+
+        let mut redemptions = HashMap::new();
+        redemptions.insert(end_date, 100.0);
+
+        let mut additional_coupon_dates = HashSet::new();
+        additional_coupon_dates.insert(start_date + Period::new(1, TimeUnit::Years));
+
+        let rate = InterestRate::new(
+            0.04,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        );
+
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_disbursements(disbursements)
+            .with_redemptions(redemptions)
+            .with_additional_coupon_dates(additional_coupon_dates)
+            .with_rate(rate)
+            .with_side(Side::Pay)
+            .with_currency(Currency::USD)
+            .other()
+            .build()?;
+
+        assert_eq!(instrument.notional(), 100.0);
+        assert_eq!(instrument.start_date(), start_date);
+        assert_eq!(instrument.end_date(), end_date);
+        Ok(())
+    }
+
+    #[test]
+    fn build_zero_with_non_annual_frequency() -> Result<()> {
+        let start_date = Date::new(2023, 3, 10);
+        let end_date = start_date + Period::new(6, TimeUnit::Months);
+
+        let rate = InterestRate::new(
+            0.02,
+            Compounding::Simple,
+            Frequency::Semiannual,
+            DayCounter::Actual360,
+        );
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_payment_frequency(Frequency::Semiannual)
+            .with_rate(rate)
+            .with_notional(200.0)
+            .with_side(Side::Receive)
+            .with_currency(Currency::CLP)
+            .zero()
+            .build()?;
+
+        assert_eq!(instrument.notional(), 200.0);
+        assert_eq!(instrument.rate(), rate);
+        assert_eq!(instrument.start_date(), start_date);
+        assert_eq!(instrument.end_date(), end_date);
+        Ok(())
+    }
+
+    #[test]
+    fn build_equal_redemptions_with_first_coupon_date() -> Result<()> {
+        let start_date = Date::new(2024, 1, 1);
+        let end_date = start_date + Period::new(2, TimeUnit::Years);
+        let first_coupon_date = start_date + Period::new(6, TimeUnit::Months);
+
+        let rate = InterestRate::new(
+            0.06,
+            Compounding::Compounded,
+            Frequency::Semiannual,
+            DayCounter::Actual360,
+        );
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_first_coupon_date(Some(first_coupon_date))
+            .with_payment_frequency(Frequency::Semiannual)
+            .with_rate(rate)
+            .with_notional(300.0)
+            .with_side(Side::Pay)
+            .with_currency(Currency::EUR)
+            .equal_redemptions()
+            .build()?;
+
+        assert_eq!(instrument.notional(), 300.0);
+        assert_eq!(instrument.rate(), rate);
+        assert_eq!(instrument.payment_frequency(), Frequency::Semiannual);
+        assert_eq!(instrument.start_date(), start_date);
+        assert_eq!(instrument.end_date(), end_date);
+        Ok(())
+    }
+
+    #[test]
+    fn build_bullet_with_discount_curve_id() -> Result<()> {
+        let start_date = Date::new(2025, 5, 5);
+        let end_date = start_date + Period::new(1, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.025,
+            Compounding::Compounded,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        );
+        let instrument = MakeFixedRateBond::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_payment_frequency(Frequency::Annual)
+            .with_rate(rate)
+            .with_notional(1000.0)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(42))
+            .bullet()
+            .build()?;
+
+        assert_eq!(instrument.notional(), 1000.0);
+        assert_eq!(instrument.discount_curve_id(), Some(42));
+        Ok(())
+    }
+
+}
