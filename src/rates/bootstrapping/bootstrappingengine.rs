@@ -1,10 +1,13 @@
 use std::fmt::Display;
 
 use crate::{
-    currencies::enums::Currency, rates::{
-        bootstrapping::bootstrappingmarketstore::BootstrappingMarketStore,
-        traits::HasReferenceDate,
-    }, time::date::Date, utils::errors::{AtlasError, Result}, visitors::traits::HasCashflows
+    currencies::enums::Currency,
+    rates::{
+        bootstrapping::bootstrappingmarketstore::BootstrappingMarketStore, traits::HasReferenceDate,
+    },
+    time::date::Date,
+    utils::errors::{AtlasError, Result},
+    visitors::traits::HasCashflows,
 };
 
 /// # BootstrappingEngine
@@ -101,7 +104,11 @@ impl BootstrappingEngine {
         }
 
         let curves_map = self.market_store.curves_map_mut();
-        for ((curve_id, element_id), &new_df) in self.optimization_order.iter().zip(new_discount_factors.iter()) {
+        for ((curve_id, element_id), &new_df) in self
+            .optimization_order
+            .iter()
+            .zip(new_discount_factors.iter())
+        {
             let curve = curves_map.get_mut(curve_id).ok_or_else(|| {
                 AtlasError::BootstrappingErr(format!("Curve with id {} not found", curve_id))
             })?;
@@ -147,12 +154,17 @@ impl BootstrappingEngine {
     pub fn estimated_relevant_discount_factors(&self, curve_id: usize) -> Vec<(usize, usize)> {
         let curve = self.market_store.curves_map().get(&curve_id);
         if let Some(curve) = curve {
-            curve.dates().iter().skip(1).enumerate().map(|(i, _)| (curve_id, i+1)).collect()
+            curve
+                .dates()
+                .iter()
+                .skip(1)
+                .enumerate()
+                .map(|(i, _)| (curve_id, i + 1))
+                .collect()
         } else {
             vec![]
         }
     }
-
 }
 
 use colored::*;
@@ -698,7 +710,10 @@ mod tests {
         bootstrappingmarketstore.add_curve(1, Currency::USD)?;
 
         let estimated_dfs = engine.estimated_relevant_discount_factors(1);
-        assert!(estimated_dfs.is_empty(), "Expected no discount factors for empty curve");
+        assert!(
+            estimated_dfs.is_empty(),
+            "Expected no discount factors for empty curve"
+        );
         Ok(())
     }
 
@@ -710,8 +725,10 @@ mod tests {
         bootstrappingmarketstore.add_curve(1, Currency::USD)?;
 
         let estimated_dfs = engine.estimated_relevant_discount_factors(2);
-        assert!(estimated_dfs.is_empty(), "Expected no discount factors for non-existent curve");
+        assert!(
+            estimated_dfs.is_empty(),
+            "Expected no discount factors for non-existent curve"
+        );
         Ok(())
     }
-
 }

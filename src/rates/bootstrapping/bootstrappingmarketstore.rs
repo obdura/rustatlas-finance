@@ -67,6 +67,15 @@ impl BootstrappingMarketStore {
         self.currency_curve.insert(currency, fx_curve);
     }
 
+    pub fn get_curve(&self, id: usize) -> Result<&BootstrappingCurve> {
+        self.curves_map
+            .get(&id)
+            .ok_or(AtlasError::NotFoundErr(format!(
+                "Curve with id {} not found",
+                id
+            )))
+    }
+
     pub fn get_currency_curve(&self, currency: Currency) -> Result<usize> {
         self.currency_curve
             .get(&currency)
