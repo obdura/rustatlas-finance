@@ -250,9 +250,12 @@ impl MakeFloatingRateLeg {
         // Default spread to 0.0 if not set
         let spread = self.spread.unwrap_or(0.0);
 
-        let payment_frequency = self
-            .payment_frequency
-            .ok_or(AtlasError::ValueNotSetErr("Payment frequency".into()))?;
+        let payment_frequency = if structure == Structure::Zero {
+            Frequency::Once
+        } else {
+            self.payment_frequency
+                .ok_or(AtlasError::ValueNotSetErr("Payment frequency".into()))?
+        };
 
         let side = self.side.ok_or(AtlasError::ValueNotSetErr("Side".into()))?;
 
@@ -306,7 +309,7 @@ impl MakeFloatingRateLeg {
             .unwrap_or(DateGenerationRule::Backward);
 
         match structure {
-            Structure::Bullet => {
+            Structure::Bullet | Structure::Zero => {
                 // make schedule
                 let mut schedule_builder =
                     MakeSchedule::new(adjusted_start_date, adjusted_end_date)
@@ -319,9 +322,9 @@ impl MakeFloatingRateLeg {
                 let fixing_schedule = schedule_builder.build()?;
                 let fixings_dates = fixing_schedule.dates();
 
-                let maturity_date = fixings_dates.last().ok_or(
-                    AtlasError::ValueNotSetErr("Fixing schedule should have at least one date".into()),
-                )?;
+                let maturity_date = fixings_dates.last().ok_or(AtlasError::ValueNotSetErr(
+                    "Fixing schedule should have at least one date".into(),
+                ))?;
 
                 let payment_dates = match self.payment_lag {
                     Some(lag) => fixings_dates
@@ -333,11 +336,9 @@ impl MakeFloatingRateLeg {
                     None => fixings_dates.clone(),
                 };
 
-                let last_payment_date = payment_dates
-                    .last()
-                    .ok_or(AtlasError::ValueNotSetErr(
-                        "Payment dates should have at least one date".into(),
-                    ))?;
+                let last_payment_date = payment_dates.last().ok_or(AtlasError::ValueNotSetErr(
+                    "Payment dates should have at least one date".into(),
+                ))?;
 
                 let first_date: Vec<Date> = vec![*payment_dates.first().unwrap()];
                 let last_date: Vec<Date> = vec![*payment_dates.last().unwrap()];
@@ -459,10 +460,15 @@ mod tests {
             traits::{Payable, RequiresFixingRate},
         },
         currencies::enums::Currency,
-        instruments::constructors::makefloatingrateleg::MakeFloatingRateLeg,
+        instruments::{constructors::makefloatingrateleg::MakeFloatingRateLeg, traits::Structure},
         rates::{enums::Compounding, interestrate::RateDefinition},
         time::{
-            calendar::Calendar, calendars::unitedstates::{UnitedStates, UnitedStatesMarket}, date::Date, daycounter::DayCounter, enums::{BusinessDayConvention, Frequency, TimeUnit}, period::Period
+            calendar::Calendar,
+            calendars::unitedstates::{UnitedStates, UnitedStatesMarket},
+            date::Date,
+            daycounter::DayCounter,
+            enums::{BusinessDayConvention, Frequency, TimeUnit},
+            period::Period,
         },
         visitors::traits::HasCashflows,
     };
@@ -570,7 +576,6 @@ mod tests {
             Frequency::Annual,
         );
 
-
         let notional = 1_000_000.0;
 
         let fix_leg = MakeFloatingRateLeg::new()
@@ -607,8 +612,6 @@ mod tests {
             assert!(expected_payment_day.contains(&cf.payment_date()));
         });
     }
-
-
 
     #[test]
     fn test_payment_date_in_make_floating_rate_leg_with_sofr_calendar_and_settlement_period() {
@@ -658,5 +661,54 @@ mod tests {
         fix_leg.cashflows().for_each(|cf| {
             assert!(expected_payment_day.contains(&cf.payment_date()));
         });
+    }
+
+    #[test]
+    fn test_make_floating_rate_leg_pay_zero_structure() {
+        let start_date = Date::new(2020, 1, 1);
+        let end_date = start_date + Period::new(5, TimeUnit::Years);
+        let rate_defintion = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let spread = 0.0;
+
+        let notional = 1_000_000.0;
+        let mut instrument = MakeFloatingRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_rate_definition(rate_defintion)
+            .with_spread(spread)
+            .with_notional(notional)
+            .with_side(Side::Pay)
+            .with_currency(Currency::USD)
+            .zero()
+            .build()
+            .unwrap();
+
+        assert!(instrument.payment_frequency() == Frequency::Once);
+        assert!(instrument.structure() == Structure::Zero);
+        assert!(instrument.cashflows_as_vec().len() == 2);
+
+        let fixing_rate = 0.05;
+        for cf in instrument.mut_cashflows() {
+            cf.set_fixing_rate(fixing_rate);
+            assert!(cf.amount().unwrap() > 0.0);
+        }
+
+        let fixing_rate = -0.05;
+        for cf in instrument.mut_cashflows() {
+            cf.set_fixing_rate(fixing_rate);
+            match cf {
+                Cashflow::Redemption(_) => {
+                    assert!(cf.amount().unwrap() > 0.0);
+                }
+                Cashflow::FloatingRateCoupon(_) => {
+                    assert!(cf.amount().unwrap() < 0.0);
+                }
+                _ => (),
+            };
+        }
     }
 }

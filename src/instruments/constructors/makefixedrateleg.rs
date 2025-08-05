@@ -256,6 +256,12 @@ impl MakeFixedRateLeg {
         self
     }
 
+    /// Sets the structure to zero.
+    pub fn zero(mut self) -> MakeFixedRateLeg {
+        self.structure = Some(Structure::Zero);
+        self
+    }
+
     /// Sets the initial flow.
     pub fn with_initial_flow(mut self, initial_flow: bool) -> MakeFixedRateLeg {
         self.initial_flow = initial_flow;
@@ -291,13 +297,16 @@ impl MakeFixedRateLeg {
             .calendar
             .unwrap_or(Calendar::NullCalendar(NullCalendar::new()));
 
-        let payment_frequency = self
-            .payment_frequency
-            .ok_or(AtlasError::ValueNotSetErr("Payment frequency".into()))?;
-
         let structure = self
             .structure
             .ok_or(AtlasError::ValueNotSetErr("Structure".into()))?;
+
+        let payment_frequency = if structure == Structure::Zero {
+            Frequency::Once
+        } else {
+            self.payment_frequency
+                .ok_or(AtlasError::ValueNotSetErr("Payment frequency".into()))?
+        };
 
         let adjusted_start_date = match self.start_date {
             Some(date) => date,
@@ -340,7 +349,7 @@ impl MakeFixedRateLeg {
             .unwrap_or(DateGenerationRule::Backward);
 
         match structure {
-            Structure::Bullet => {
+            Structure::Bullet | Structure::Zero => {
                 // make schedule
                 let mut schedule_builder =
                     MakeSchedule::new(adjusted_start_date, adjusted_end_date)
@@ -367,11 +376,9 @@ impl MakeFixedRateLeg {
                     None => fixings_dates.clone(),
                 };
 
-                let last_payment_date = payment_dates
-                    .last()
-                    .ok_or(AtlasError::ValueNotSetErr(
-                        "Payment dates should have at least one date".into(),
-                    ))?;
+                let last_payment_date = payment_dates.last().ok_or(AtlasError::ValueNotSetErr(
+                    "Payment dates should have at least one date".into(),
+                ))?;
 
                 let first_date: Vec<Date> = vec![*payment_dates.first().unwrap()];
                 let last_date: Vec<Date> = vec![*payment_dates.last().unwrap()];
@@ -481,13 +488,10 @@ mod tests {
 
     use super::MakeFixedRateLeg;
     use crate::{
-        cashflows::{side::Side, traits::Payable},
-        currencies::enums::Currency,
-        rates::{
+        cashflows::{side::Side, traits::Payable}, currencies::enums::Currency, instruments::traits::Structure, rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
-        },
-        time::{
+        }, time::{
             calendar::Calendar,
             calendars::{
                 chile::Chile,
@@ -497,8 +501,7 @@ mod tests {
             daycounter::DayCounter,
             enums::{BusinessDayConvention, DateGenerationRule, Frequency, TimeUnit},
             period::Period,
-        },
-        visitors::traits::HasCashflows,
+        }, visitors::traits::HasCashflows
     };
 
     #[test]
@@ -766,5 +769,35 @@ mod tests {
         fix_leg.cashflows().for_each(|cf| {
             assert!(expected_payment_day.contains(&cf.payment_date()));
         });
+    }
+
+    #[test]
+    fn test_make_fixed_rate_leg_pay_zero_structure() {
+        let start_date = Date::new(2020, 1, 1);
+        let end_date = start_date + Period::new(5, TimeUnit::Years);
+        let rate_defintion = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let rate = InterestRate::from_rate_definition(0.05, rate_defintion);
+
+        let notional = 1_000_000.0;
+        let instrument = MakeFixedRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_rate_definition(rate_defintion)
+            .with_rate(rate)
+            .with_notional(notional)
+            .with_side(Side::Pay)
+            .with_currency(Currency::USD)
+            .zero()
+            .build()
+            .unwrap();
+
+        assert!(instrument.payment_frequency() == Frequency::Once);
+        assert!(instrument.structure() == Structure::Zero);
+        assert!(instrument.cashflows_as_vec().len() == 2);
+
     }
 }
