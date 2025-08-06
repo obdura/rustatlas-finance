@@ -28,7 +28,7 @@ use std::cell::RefCell;
 ///
 pub struct BootstrappingSolver<'a> {
     engine: &'a RefCell<BootstrappingEngine>,
-    indexer: IndexingVisitor,
+    indexer: RefCell<IndexingVisitor>, // Visitor to index cashflows and generate market requests
     optimization_order: Option<Vec<Vec<(usize, usize)>>>,
     max_iterations: usize, // Maximum number of iterations for the optimization
     tolerance: f64,        // Tolerance for convergence
@@ -38,17 +38,9 @@ pub struct BootstrappingSolver<'a> {
 impl<'a> BootstrappingSolver<'a> {
     pub fn new(engine: &'a RefCell<BootstrappingEngine>) -> Result<Self> {
         let indexer = IndexingVisitor::new();
-        engine
-            .borrow_mut()
-            .instruments_mut()
-            .iter_mut()
-            .try_for_each(|mut instrument| -> Result<()> {
-                indexer.visit(&mut instrument)?;
-                Ok(())
-            })?;
         Ok(BootstrappingSolver {
             engine,
-            indexer,
+            indexer: RefCell::new(indexer),
             optimization_order: None,
             max_iterations: 500,
             tolerance: 1e-14,
@@ -130,11 +122,28 @@ impl<'a> BootstrappingSolver<'a> {
 
         for order in optimization_orders {
             self.engine.borrow_mut().set_optimization_order(order);
+            self.update_indexer()?;
             self.run_optimization()?;
         }
 
         let duration = start_time.elapsed();
         println!("\t Optimization took {:?}", duration);
+        Ok(())
+    }
+
+    pub fn update_indexer(&self) -> Result<()> {
+        let new_indexer = IndexingVisitor::new();
+        let mut engine = self.engine.borrow_mut();
+        let relevant_instruments = engine.relevant_instruments();
+        engine
+            .instruments_mut()
+            .iter_mut()
+            .enumerate()
+            .filter(|(index, _)| relevant_instruments.contains(index))
+            .try_for_each(|(_, mut instrument)| new_indexer.visit(&mut instrument))?;
+
+        let mut indexer = self.indexer.borrow_mut();
+        *indexer = new_indexer;
         Ok(())
     }
 
@@ -145,7 +154,8 @@ impl<'a> BootstrappingSolver<'a> {
         let relevant_instruments = engine.relevant_instruments();
 
         let model = BootstrappingModel::new(engine.market_store());
-        let data = model.gen_market_data(&self.indexer.request()).unwrap();
+        let indexer = self.indexer.borrow_mut();
+        let data = model.gen_market_data(&indexer.request()).unwrap();
         let fixing_visitor = FixingVisitor::new(&data).with_decimals_to_round(16);
         let npv_visitor = NPVConstVisitor::new(&data, true);
 
@@ -231,7 +241,10 @@ impl<'a> Hessian for &BootstrappingSolver<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cashflows::{side::Side, traits::InterestAccrual}, core::marketstore::{MarketStore}, currencies::enums::Currency, instruments::{
+        cashflows::{side::Side, traits::InterestAccrual},
+        core::marketstore::MarketStore,
+        currencies::enums::Currency,
+        instruments::{
             constructors::{
                 makefixedrateinstrument::MakeFixedRateInstrument,
                 makefixedrateleg::MakeFixedRateLeg, makefloatingrateleg::MakeFloatingRateLeg,
@@ -239,17 +252,19 @@ mod tests {
             loandepos::fixedrateinstrument::FixedRateInstrument,
             swaps::vanillairsswap::VanillaIRSSwap,
             traits::Structure,
-        }, rates::{
+        },
+        rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
-        }, time::{
+        },
+        time::{
             calendar::Calendar,
             calendars::unitedstates::UnitedStates,
             date::Date,
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }
+        },
     };
     use std::time::Instant;
 

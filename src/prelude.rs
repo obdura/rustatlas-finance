@@ -44,7 +44,7 @@ pub use crate::{
     time::{
         calendar::*,
         calendars::{
-            brazil::*, chile::*, nullcalendar::*, target::*, unitedstates::*, weekendsonly::*,
+            brazil::*, chile::*, nullcalendar::*, target::*, unitedstates::*, weekendsonly::*, traits::*,
         },
         date::*,
         daycounter::*,
@@ -55,7 +55,7 @@ pub use crate::{
         period::*,
         schedule::*,
     },
-    utils::{errors::*, marketstoretransformation::*},
+    utils::marketstoretransformation::*,
     visitors::{
         compressorvisitors::{cashflowaggregationvisitor::*, cashflowcompressorconstvisitor::*},
         flowconsolidationvisitors::{
