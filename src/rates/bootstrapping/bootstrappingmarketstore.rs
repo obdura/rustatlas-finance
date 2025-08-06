@@ -63,6 +63,10 @@ impl BootstrappingMarketStore {
         self.local_currency
     }
 
+    pub fn exchange_rate_map(&self) -> &HashMap<(Currency, Currency), f64> {
+        &self.exchange_rate_map
+    }
+
     pub fn add_currency_curve(&mut self, currency: Currency, fx_curve: usize) {
         self.currency_curve.insert(currency, fx_curve);
     }
@@ -202,6 +206,24 @@ impl BootstrappingMarketStore {
         Ok(())
     }
 
+    pub fn add_curve_with_name(
+        &mut self,
+        id: usize,
+        currency: Currency,
+        name: String,
+    ) -> Result<()> {
+        if self.curves_map.contains_key(&id) {
+            return Err(AtlasError::BootstrappingErr(format!(
+                "Curve with id {} already exists",
+                id
+            )));
+        }
+        let mut curve = BootstrappingCurve::new(self.reference_date, id, currency);
+        curve.set_name(name);
+        self.curves_map.insert(id, curve);
+        Ok(())
+    }
+
     pub fn curves_map(&self) -> &HashMap<usize, BootstrappingCurve> {
         &self.curves_map
     }
@@ -255,7 +277,7 @@ impl TryFrom<&BootstrappingMarketStore> for MarketStore {
                 .with_currency(Some(currency))
                 .with_rate_definition(rete_definition)
                 .with_term_structure(discount_term_structure)
-                .with_name(Some(format!("Bootstrapping Curve {}", id)));
+                .with_name(Some(curve.name().cloned().unwrap_or_else(|| format!("Bootstrapping Curve {}", id))));
             new_index_store.add_index(*id, Arc::new(RwLock::new(index)))?;
         }
 
@@ -288,6 +310,7 @@ impl TryFrom<&BootstrappingMarketStore> for MarketStore {
 pub struct BootstrappingCurve {
     reference_date: Date,
     id: usize,
+    name: Option<String>,
     currency: Currency,
     dates: Vec<Date>,
     year_fractions: Vec<f64>,
@@ -303,6 +326,7 @@ impl BootstrappingCurve {
         BootstrappingCurve {
             reference_date,
             id,
+            name: None,
             currency,
             dates: vec![reference_date],
             year_fractions: vec![0.0], // Start with 0.0 for the reference date
@@ -316,6 +340,10 @@ impl BootstrappingCurve {
 
     pub fn id(&self) -> usize {
         self.id
+    }
+
+    pub fn name(&self) -> Option<&String> {
+        self.name.as_ref()
     }
 
     pub fn currency(&self) -> Currency {
@@ -352,6 +380,10 @@ impl BootstrappingCurve {
 
     pub fn enable_extrapolation(&self) -> bool {
         self.enable_extrapolation
+    }
+
+    pub fn set_name(&mut self, name: String) {
+        self.name = Some(name);
     }
 
     pub fn set_interpolator(&mut self, interpolator: Interpolator) {

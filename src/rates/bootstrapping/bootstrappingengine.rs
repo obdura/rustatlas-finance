@@ -171,6 +171,7 @@ use colored::*;
 impl Display for BootstrappingEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let curves = self.market_store.curves_map();
+        let currency = self.market_store.get_exchange_rate_map();
         write!(f, "\n")?;
         writeln!(
             f,
@@ -191,6 +192,18 @@ impl Display for BootstrappingEngine {
             "Number of Instruments:".yellow(),
             self.number_of_instruments
         )?;
+        writeln!(f, "{}", "Currency:".bold().green())?;
+        for (parity, fx) in currency.iter() {
+            writeln!(
+                f,
+                "{} {}-{}: {}",
+                "  Parity:".cyan(),
+                parity.0,
+                parity.1,
+                fx
+            )?;
+        }
+
         writeln!(f, "{}", "Curves:".bold().green())?;
         for (id, curve) in curves.iter() {
             writeln!(
