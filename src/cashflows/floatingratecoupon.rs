@@ -83,11 +83,7 @@ impl FloatingRateCoupon {
         self
     }
 
-    pub fn set_fixing_dates(
-        &mut self,
-        fixing_start_date: Date,
-        fixing_end_date: Date,
-    ) {
+    pub fn set_fixing_dates(&mut self, fixing_start_date: Date, fixing_end_date: Date) {
         self.fixing_start_date = Some(fixing_start_date);
         self.fixing_end_date = Some(fixing_end_date);
     }
@@ -207,12 +203,14 @@ impl RequiresFixingRate for FloatingRateCoupon {
         self.cashflow = self.cashflow.with_amount(accrual);
     }
 
-    fn fixing_start_date(&self) -> Result<Date> {
-        Ok(self.fixing_start_date.unwrap_or(self.accrual_start_date))
+    fn fixing_start_date(&self) -> Result<Option<Date>> {
+        Ok(Some(
+            self.fixing_start_date.unwrap_or(self.accrual_start_date),
+        ))
     }
 
-    fn fixing_end_date(&self) -> Result<Date> {
-        Ok(self.fixing_end_date.unwrap_or(self.accrual_end_date))
+    fn fixing_end_date(&self) -> Result<Option<Date>> {
+        Ok(Some(self.fixing_end_date.unwrap_or(self.accrual_end_date)))
     }
 }
 
@@ -266,18 +264,24 @@ impl Registrable for FloatingRateCoupon {
         let tmp = self.cashflow.market_request()?;
         let forecast_curve_id = self.forecast_curve_id()?;
 
+        let fixing_start_date = self.fixing_start_date()?.ok_or(AtlasError::ValueNotSetErr(
+            "Fixing start date not set".to_string(),
+        ))?;
+        let fixing_end_date = self.fixing_end_date()?.ok_or(AtlasError::ValueNotSetErr(
+            "Fixing end date not set".to_string(),
+        ))?;
+
         if self.fixing_start_date()? >= self.fixing_end_date()? {
             return Err(AtlasError::InvalidValueErr(format!(
                 "Fixing start date {} is after or equal to fixing end date {}",
-                self.fixing_start_date()?,
-                self.fixing_end_date()?
+                fixing_start_date, fixing_end_date
             )));
         }
 
         let forecast = ForwardRateRequest::new(
             forecast_curve_id,
-            self.fixing_start_date()?,
-            self.fixing_end_date()?,
+            fixing_start_date,
+            fixing_end_date,
             self.rate_definition.compounding(),
             self.rate_definition.frequency(),
         );
@@ -286,7 +290,7 @@ impl Registrable for FloatingRateCoupon {
             tmp.df(),
             Some(forecast),
             tmp.fx(),
-            tmp.fx_fwd()
+            tmp.fx_fwd(),
         ))
     }
 }
@@ -484,8 +488,8 @@ mod tests {
         coupon.set_fixing_dates(Date::new(2023, 1, 2), Date::new(2023, 1, 9));
         coupon.set_forecast_curve_id(42);
 
-        assert_eq!(coupon.fixing_start_date()?, Date::new(2023, 1, 2));
-        assert_eq!(coupon.fixing_end_date()?, Date::new(2023, 1, 9));
+        assert_eq!(coupon.fixing_start_date()?, Some(Date::new(2023, 1, 2)));
+        assert_eq!(coupon.fixing_end_date()?, Some(Date::new(2023, 1, 9)));
         assert_eq!(coupon.forecast_curve_id()?, 42);
 
         Ok(())

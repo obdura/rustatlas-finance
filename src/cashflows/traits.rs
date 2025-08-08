@@ -51,11 +51,11 @@ pub trait InterestAccrual {
 pub trait RequiresFixingRate: InterestAccrual {
     fn set_fixing_rate(&mut self, fixing_rate: f64);
 
-    fn fixing_start_date(&self) -> Result<Date> {
-        self.accrual_start_date()
+    fn fixing_start_date(&self) -> Result<Option<Date>> {
+        self.accrual_start_date().map(Some)
     }
-    fn fixing_end_date(&self) -> Result<Date> {
-        self.accrual_end_date()
+    fn fixing_end_date(&self) -> Result<Option<Date>> {
+        self.accrual_end_date().map(Some)
     }
 }
 
@@ -192,9 +192,14 @@ mod tests {
             fixing_rate: 0.0,
         };
         dummy.set_fixing_rate(0.07);
-        assert_eq!(dummy.fixing_start_date().unwrap(), Date::new(2023, 1, 1));
-        assert_eq!(dummy.fixing_end_date().unwrap(), Date::new(2023, 3, 31));
-        assert_eq!(dummy.accrued_amount(Date::new(2023, 1, 1), Date::new(2023, 3, 31)).unwrap(), 0.07);
+        assert_eq!(dummy.fixing_start_date().unwrap(), Some(Date::new(2023, 1, 1)));
+        assert_eq!(dummy.fixing_end_date().unwrap(), Some(Date::new(2023, 3, 31)));
+        assert_eq!(
+            dummy
+                .accrued_amount(Date::new(2023, 1, 1), Date::new(2023, 3, 31))
+                .unwrap(),
+            0.07
+        );
     }
 
     #[test]
@@ -223,7 +228,10 @@ mod tests {
         assert_eq!(dummy.side(), Side::Receive);
         assert_eq!(dummy.payment_date(), Date::new(2024, 1, 1));
         assert_eq!(dummy.payment_currency().unwrap(), Currency::USD);
-        assert_eq!(dummy.exchange_fixing_date().unwrap(), Date::new(2023, 12, 31));
+        assert_eq!(
+            dummy.exchange_fixing_date().unwrap(),
+            Date::new(2023, 12, 31)
+        );
     }
 
     #[test]
@@ -254,5 +262,4 @@ mod tests {
         dummy.scale(2.5).unwrap();
         assert!((dummy.value - 25.0).abs() < 1e-8);
     }
-
 }

@@ -1,13 +1,9 @@
-use std::{collections::HashSet, fmt::Display};
+use std::{collections::{HashMap, HashSet}, fmt::Display};
 
 use crate::{
-    currencies::enums::Currency,
-    rates::{
+    cashflows::traits::{Payable, RequiresFixingRate}, core::traits::{HasDiscountCurveId, HasForecastCurveId}, currencies::enums::Currency, rates::{
         bootstrapping::bootstrappingmarketstore::BootstrappingMarketStore, traits::HasReferenceDate,
-    },
-    time::date::Date,
-    utils::errors::{AtlasError, Result},
-    visitors::traits::HasCashflows,
+    }, time::date::Date, utils::errors::{AtlasError, Result}, visitors::traits::HasCashflows
 };
 
 /// # BootstrappingEngine
@@ -167,6 +163,47 @@ impl BootstrappingEngine {
     }
 }
 
+pub fn relevant_pricing_dates(instruments: &Vec<Box<dyn HasCashflows>>) -> Result<HashMap<usize,HashSet<Date>>> {
+    let mut pricing_dates = HashMap::new();
+
+    for inst in instruments {
+        inst.cashflows()
+            .try_for_each(|cf| -> Result<()> {
+                let discount_curve_id = cf.discount_curve_id()?;
+                let payment_date = cf.payment_date();
+                let exchange_fixing_date = cf.exchange_fixing_date()?;
+                pricing_dates
+                    .entry(discount_curve_id)
+                    .or_insert_with(HashSet::new)
+                    .insert(payment_date);
+                pricing_dates
+                    .entry(discount_curve_id)
+                    .or_insert_with(HashSet::new)
+                    .insert(exchange_fixing_date);
+
+                if let Ok(forescast_curve_id) = cf.forecast_curve_id() {
+                    if let Some(fixing_start_date) = cf.fixing_start_date()? {
+                        pricing_dates
+                            .entry(forescast_curve_id)
+                            .or_insert_with(HashSet::new)
+                            .insert(fixing_start_date);
+                    }
+                    if let Some(fixing_end_date) = cf.fixing_end_date()? {
+                        pricing_dates
+                            .entry(forescast_curve_id)
+                            .or_insert_with(HashSet::new)
+                            .insert(fixing_end_date);
+                    }
+                }
+                Ok(())
+            })?;
+    }
+
+    Ok(pricing_dates)
+}
+
+
+
 use colored::*;
 impl Display for BootstrappingEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -248,7 +285,7 @@ mod tests {
         models::traits::Model,
         rates::{
             bootstrapping::{
-                bootstrappingengine::BootstrappingEngine,
+                bootstrappingengine::{relevant_pricing_dates, BootstrappingEngine},
                 bootstrappingmarketstore::BootstrappingModel,
             },
             enums::Compounding,
@@ -642,6 +679,35 @@ mod tests {
     }
 
     #[test]
+    fn test_bootstrapping_engine_add_instrument_invalid_curve() -> Result<()> {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let end_date = ref_date + Period::new(1, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.05,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        );
+
+        let inst = MakeFixedRateInstrument::new()
+            .with_currency(Currency::USD)
+            .with_side(Side::Receive)
+            .with_start_date(ref_date)
+            .with_end_date(end_date)
+            .with_rate(rate)
+            .with_notional(1_000_000.0)
+            .with_discount_curve_id(Some(99)) // Invalid curve ID
+            .zero()
+            .build()?;
+
+        let inst = engine.add_instrument(99, end_date, Box::new(inst));
+
+        assert!(inst.is_err());
+        Ok(())
+    }
+
+    #[test]
     fn test_bootstrapping_engine_update_discount_factors_invalid_element() -> Result<()> {
         let ref_date = Date::new(2022, 1, 1);
         let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
@@ -742,6 +808,63 @@ mod tests {
             estimated_dfs.is_empty(),
             "Expected no discount factors for non-existent curve"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_relevant_pricing_dates() -> Result<()> {
+        let ref_date = Date::new(2022, 1, 1);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let bootstrappingmarketstore = engine.market_store_mut();
+        bootstrappingmarketstore.add_curve(1, Currency::USD)?;
+        bootstrappingmarketstore.add_curve(3, Currency::USD)?;
+
+        let end_date = ref_date + Period::new(1, TimeUnit::Years);
+        let rate = InterestRate::new(
+            0.05,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        );
+
+        let inst1 = MakeFixedRateInstrument::new()
+            .with_currency(Currency::USD)
+            .with_side(Side::Receive)
+            .with_start_date(ref_date)
+            .with_end_date(end_date)
+            .with_rate(rate)
+            .with_notional(1_000_000.0)
+            .with_discount_curve_id(Some(1)) // Assuming the curve ID is 1
+            .zero()
+            .build()?;
+
+        engine.add_instrument(1, end_date, Box::new(inst1))?;
+
+        let end_date = ref_date + Period::new(2, TimeUnit::Years);
+        let inst2 = MakeFixedRateInstrument::new()
+            .with_currency(Currency::USD)
+            .with_side(Side::Receive)
+            .with_start_date(ref_date)
+            .with_end_date(end_date)
+            .with_rate(rate)
+            .with_notional(1_000_000.0)
+            .with_discount_curve_id(Some(3))
+            .with_payment_frequency(Frequency::Annual) 
+            .bullet()
+            .build()?;
+
+        engine.add_instrument(3, end_date, Box::new(inst2))?;
+
+        let pricing_dates = relevant_pricing_dates(engine.instruments())?;
+        assert!(pricing_dates.contains_key(&1));
+        assert!(pricing_dates.contains_key(&3));
+        assert_eq!(pricing_dates[&1].len(), 2); 
+        assert_eq!(pricing_dates[&3].len(), 3); 
+        assert!(pricing_dates[&1].contains(&(ref_date + Period::new(1, TimeUnit::Years))));
+        assert!(pricing_dates[&3].contains(&(ref_date + Period::new(2, TimeUnit::Years))));
+        assert!(pricing_dates[&3].contains(&(ref_date + Period::new(1, TimeUnit::Years))));
+        assert!(pricing_dates[&3].contains(&ref_date));
+        assert!(pricing_dates[&3].contains(&ref_date));
         Ok(())
     }
 }

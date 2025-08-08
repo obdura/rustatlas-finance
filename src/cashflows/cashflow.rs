@@ -223,21 +223,17 @@ impl RequiresFixingRate for Cashflow {
         }
     }
 
-    fn fixing_start_date(&self) -> Result<Date> {
+    fn fixing_start_date(&self) -> Result<Option<Date>> {
         match self {
             Cashflow::FloatingRateCoupon(coupon) => coupon.fixing_start_date(),
-            _ => Err(AtlasError::InvalidValueErr(
-                "Only FloatingRateCoupon cashflows have a fixing start date".to_string(),
-            )),
+            _ => Ok(None),
         }
     }
 
-    fn fixing_end_date(&self) -> Result<Date> {
+    fn fixing_end_date(&self) -> Result<Option<Date>> {
         match self {
             Cashflow::FloatingRateCoupon(coupon) => coupon.fixing_end_date(),
-            _ => Err(AtlasError::InvalidValueErr(
-                "Only FloatingRateCoupon cashflows have a fixing end date".to_string(),
-            )),
+            _ => Ok(None),
         }
     }
 }
@@ -417,13 +413,13 @@ mod tests {
     }
 
     #[test]
-    fn requires_fixing_rate_error_on_redemption() {
+    fn requires_fixing_rate_none_on_redemption() {
         let cashflow = Cashflow::Redemption(SimpleCashflow::new(
             Date::new(2024, 1, 1),
             Currency::USD,
             Side::Receive,
         ));
-        assert!(cashflow.fixing_start_date().is_err());
-        assert!(cashflow.fixing_end_date().is_err());
+        assert!(matches!(cashflow.fixing_start_date(), Ok(None)));
+        assert!(matches!(cashflow.fixing_end_date(), Ok(None)));
     }
 }
