@@ -12,22 +12,25 @@ use super::super::traits::{HasCashflows, Visit};
 /// ## Parameters
 /// * `market_data` - The market data to use for fixing
 /// * `decimals_to_round` - The number of decimals to round the fixing rate
-/// 
+///
 pub struct FixingVisitor<'a> {
     market_data: &'a [MarketData],
     decimals_to_round: usize,
+    truncated: bool,
 }
 
 impl<'a> FixingVisitor<'a> {
     pub fn new(market_data: &'a [MarketData]) -> Self {
         FixingVisitor {
             market_data: market_data,
-            decimals_to_round: 6,
+            decimals_to_round: 10,
+            truncated: false,
         }
     }
 
     pub fn with_decimals_to_round(mut self, decimals_to_round: usize) -> Self {
         self.decimals_to_round = decimals_to_round;
+        self.truncated = true;
         self
     }
 
@@ -37,14 +40,23 @@ impl<'a> FixingVisitor<'a> {
             .try_for_each(|cf| -> Result<()> {
                 if let Cashflow::FloatingRateCoupon(frcf) = cf {
                     let id = frcf.id()?;
-                    let cf_market_data = self.market_data.get(id)
-                        .ok_or(AtlasError::NotFoundErr(format!(
-                            "Market data for cashflow with id {}", id
-                        )))?;
+                    let cf_market_data =
+                        self.market_data
+                            .get(id)
+                            .ok_or(AtlasError::NotFoundErr(format!(
+                                "Market data for cashflow with id {}",
+                                id
+                            )))?;
                     let mut fixing_rate = cf_market_data.fwd()?;
-                    fixing_rate = (fixing_rate * 10_f64.powi(self.decimals_to_round as i32)).round()
-                        / 10_f64.powi(self.decimals_to_round as i32);
-                    frcf.set_fixing_rate(fixing_rate);
+                    if self.truncated {
+                        fixing_rate = (fixing_rate * 10_f64.powi(self.decimals_to_round as i32))
+                            .round()
+                            / 10_f64.powi(self.decimals_to_round as i32);
+                        frcf.set_fixing_rate(fixing_rate);
+                    }
+                    else {
+                        frcf.set_fixing_rate(fixing_rate);
+                    }
                 }
                 Ok(())
             })?;

@@ -33,6 +33,7 @@ pub struct BootstrappingSolver<'a> {
     max_iterations: usize, // Maximum number of iterations for the optimization
     tolerance: f64,        // Tolerance for convergence
     epsilon: f64,          // Epsilon for numerical differentiation
+    inv_epsilon: f64, // Inverse epsilon for numerical differentiation
 }
 
 impl<'a> BootstrappingSolver<'a> {
@@ -45,6 +46,7 @@ impl<'a> BootstrappingSolver<'a> {
             max_iterations: 500,
             tolerance: 1e-14,
             epsilon: 1e-12,
+            inv_epsilon: 1.0 / 1e-12,
         })
     }
 
@@ -81,6 +83,7 @@ impl<'a> BootstrappingSolver<'a> {
 
     pub fn with_epsilon(mut self, epsilon: f64) -> Self {
         self.epsilon = epsilon;
+        self.inv_epsilon = 1.0 / epsilon;
         self
     }
 
@@ -156,9 +159,9 @@ impl<'a> BootstrappingSolver<'a> {
         let model = BootstrappingModel::new(engine.market_store());
         let indexer = self.indexer.borrow_mut();
         let data = model.gen_market_data(&indexer.request()).unwrap();
-        let fixing_visitor = FixingVisitor::new(&data).with_decimals_to_round(16);
+        let fixing_visitor = FixingVisitor::new(&data);
         let npv_visitor = NPVConstVisitor::new(&data, true);
-
+        
         let residuals = engine
             .instruments_mut()
             .iter_mut()
@@ -189,18 +192,14 @@ impl<'a> Jacobian for &BootstrappingSolver<'a> {
     fn jacobian(&self, x: &nalgebra::DVector<f64>) -> Result<DMatrix<f64>> {
         let epsilon = self.epsilon;
         let n = x.len();
+        let r_base = self.residual(x)?;
         let mut jacobian = DMatrix::zeros(n, n);
         for i in 0..n {
             let mut plus = x.clone();
-            let mut minus = x.clone();
             plus[i] += epsilon;
-            minus[i] -= epsilon;
-
             let r_plus = self.residual(&plus)?;
-            let r_minus = self.residual(&minus)?;
-
             for j in 0..n {
-                jacobian[(j, i)] = (r_plus[j] - r_minus[j]) / (2.0 * epsilon);
+                jacobian[(j, i)] = (r_plus[j] - r_base[j]) * self.inv_epsilon;
             }
         }
         Ok(jacobian)

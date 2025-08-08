@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{collections::HashSet, fmt::Display};
 
 use crate::{
     currencies::enums::Currency,
@@ -125,8 +125,8 @@ impl BootstrappingEngine {
         Ok(())
     }
 
-    pub fn relevant_instruments(&self) -> Vec<usize> {
-        let mut relevant_instruments = Vec::new();
+    pub fn relevant_instruments(&self) -> HashSet<usize> {
+        let mut relevant_instruments = HashSet::new();
         for (curve_id, element_id) in self.optimization_order.iter() {
             if let Some(curve) = self.market_store.curves_map().get(curve_id) {
                 let id = curve
@@ -134,7 +134,7 @@ impl BootstrappingEngine {
                     .get(*element_id)
                     .unwrap()
                     .unwrap();
-                relevant_instruments.push(id);
+                relevant_instruments.insert(id);
             }
         }
         relevant_instruments
