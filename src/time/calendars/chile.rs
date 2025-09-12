@@ -5,9 +5,18 @@ use chrono::{Datelike, NaiveDate, Weekday};
 use crate::time::date::Date;
 use super::traits::{easter_monday, ImplCalendar, IsCalendar};
 
-/// # Chile 
-/// A calendar for Chile
+/// # Chile Calendar
 /// 
+/// A calendar implementation for Chilean financial markets.
+/// 
+/// ## Disclaimer
+/// This calendar is provided for reference purposes only and should be used exclusively 
+/// for instrument valuation estimates. It is NOT an official calendar and may not reflect 
+/// actual market holidays or business days. Users should verify against official sources 
+/// for production use.
+/// 
+/// ## Markets
+/// - SSE: Santiago Stock Exchange calendar
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChileMarket {

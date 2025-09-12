@@ -488,11 +488,11 @@ mod tests {
 
     use super::MakeFixedRateLeg;
     use crate::{
-        cashflows::{side::Side, traits::Payable}, currencies::enums::Currency, instruments::traits::Structure, rates::{
+        cashflows::{cashflow::Cashflow, side::Side, traits::{InterestAccrual, Payable}}, currencies::enums::Currency, instruments::traits::Structure, rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
         }, time::{
-            calendar::Calendar,
+            calendar::{Calendar},
             calendars::{
                 chile::Chile,
                 unitedstates::{UnitedStates, UnitedStatesMarket},
@@ -799,5 +799,46 @@ mod tests {
         assert!(instrument.structure() == Structure::Zero);
         assert!(instrument.cashflows_as_vec().len() == 2);
 
+    }
+
+    #[test]
+    fn test_make_fixed_rate_leg_pay_zero_structure_with_settlement() {
+        let start_date = Date::new(2025, 8, 11);
+        let rate_defintion = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let rate = InterestRate::from_rate_definition(0.05, rate_defintion);
+
+        let calendar = Calendar::Chile(Chile::default());
+        let notional = 1_000_000.0;
+        let instrument = MakeFixedRateLeg::new()
+            .with_calendar(Some(calendar))
+            .with_negotiation_date(start_date)
+            .with_tenor(Period::new(1, TimeUnit::Months))
+            .with_rate_definition(rate_defintion)
+            .with_settlement_period(Period::new(2, TimeUnit::Days))
+            .with_payment_lag(Period::new(0, TimeUnit::Days))
+            .with_rate(rate)
+            .with_notional(notional)
+            .with_side(Side::Pay)
+            .with_currency(Currency::USD)
+            .zero()
+            .build()
+            .unwrap();
+
+        assert!(instrument.last_payment_date() == Date::new(2025, 9, 15));
+
+        instrument.cashflows().for_each(|cf| {
+            assert!(cf.payment_date() == Date::new(2025, 9, 15));
+            match cf {
+                Cashflow::FixedRateCoupon(coupon) => {
+                    assert!(coupon.accrual_start_date().unwrap() == Date::new(2025, 8, 13));
+                    assert!(coupon.accrual_end_date().unwrap() == Date::new(2025, 9, 13));
+                }
+                _ => (),
+            };
+        });
     }
 }

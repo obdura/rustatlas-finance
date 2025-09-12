@@ -125,6 +125,11 @@ impl FixingProvider for OvernightIndex {
     fn add_fixing(&mut self, date: Date, rate: f64) {
         self.fixings.insert(date, rate);
     }
+
+    fn set_fixings(&mut self, fixings: HashMap<Date, f64>) -> Result<()> {
+        self.fixings = fixings;
+        Ok(())
+    }
 }
 
 // Implement HasReferenceDate for OvernightIndex

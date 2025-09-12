@@ -16,12 +16,14 @@ use crate::{
 /// * fixing - Get the fixing for a given date.
 /// * fixings - Get all the fixings.
 /// * add_fixing - Add a fixing for a given date.
+/// * set_fixings - Set the fixings 
 /// * fill_missing_fixings - Fill missing fixings using interpolation.
 /// 
 pub trait FixingProvider {
     fn fixing(&self, date: Date) -> Result<f64>;
     fn fixings(&self) -> &HashMap<Date, f64>;
     fn add_fixing(&mut self, date: Date, rate: f64);
+    fn set_fixings(&mut self, fixings: HashMap<Date, f64>) -> Result<()>;
     fn fill_missing_fixings(&mut self, interpolator: Interpolator) -> Result<()> {
         if !self.fixings().is_empty() {
             let first_date = self.fixings().keys().min().unwrap().clone();

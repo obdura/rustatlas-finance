@@ -5,9 +5,19 @@ use chrono::{Datelike, NaiveDate, Weekday};
 use crate::time::date::Date;
 use super::traits::{easter_monday, ImplCalendar, IsCalendar};
 
-/// # Brazil     
-/// A calendar for Brazil 
+/// # Brazil Calendar
 /// 
+/// A calendar implementation for Brazil financial markets.
+/// 
+/// ## Disclaimer
+/// This calendar is provided for reference purposes only and should be used exclusively 
+/// for instrument valuation estimates. It is NOT an official calendar and may not reflect 
+/// actual market holidays or business days. Users should verify against official sources 
+/// for production use.
+/// 
+/// ## Markets
+/// - Settlement: Brazilian settlement calendar
+/// - Exchange: Brazilian exchange calendar (B3)
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BrazilMarket {

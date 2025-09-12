@@ -218,7 +218,13 @@ pub trait IsCalendar: ImplCalendar {
                         }
                         n -= 1;
                     }
-                } else {
+                } 
+                else if n == 0 && self.is_holiday(&d1) { 
+                    while self.is_holiday(&d1) {
+                        d1 += 1;
+                    }
+                }
+                else {
                     while n < 0 {
                         d1 -= 1;
                         while self.is_holiday(&d1) {
@@ -227,6 +233,7 @@ pub trait IsCalendar: ImplCalendar {
                         n += 1;
                     }
                 }
+
             }
             TimeUnit::Weeks => {
                 d1 = d1 + period;
@@ -372,5 +379,39 @@ mod tests {
         let sunday = Date::new(2025, 8, 31); // Sunday
         let adjusted = calendar.adjust(sunday, Some(BusinessDayConvention::ModifiedFollowing));
         assert_eq!(adjusted, Date::new(2025, 8, 29)); // Friday (preceding)
+    }
+
+    #[test]
+    fn test_advance() {
+        let calendar = Chile::new(ChileMarket::SSE);
+        let date = Date::new(2025, 9, 12);
+        let advance = Period::new(1, TimeUnit::Days);
+        let advanced = calendar.advance(date, advance, None, false);
+        assert!(advanced.day() == 15);
+
+        let date = Date::new(2025, 9, 13);
+        let advance = Period::new(1, TimeUnit::Days);
+        let advanced = calendar.advance(date, advance, None, false);
+        assert!(advanced.day() == 15);
+
+        let date = Date::new(2025, 9, 14);
+        let advance = Period::new(1, TimeUnit::Days);
+        let advanced = calendar.advance(date, advance, None, false);
+        assert!(advanced.day() == 15);
+    }
+
+    #[test]
+    fn test_advance_0_days() {
+        let calendar = Chile::new(ChileMarket::SSE);
+        let date = Date::new(2025, 9, 13);
+        let advance = Period::new(0, TimeUnit::Days);
+        let advanced = calendar.advance(date, advance, None, false);
+        assert!(advanced.day() == 15);
+
+        let calendar = Chile::new(ChileMarket::SSE);
+        let date = Date::new(2025, 9, 14);
+        let advance = Period::new(0, TimeUnit::Days);
+        let advanced = calendar.advance(date, advance, None, false);
+        assert!(advanced.day() == 15);
     }
 }

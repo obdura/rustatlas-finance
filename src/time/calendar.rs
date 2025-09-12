@@ -240,6 +240,8 @@ impl IsCalendar for Calendar {}
 mod tests {
     use crate::time::calendars::traits::IsCalendar;
     use crate::time::date::Date;
+    use crate::time::enums::{BusinessDayConvention, TimeUnit};
+    use crate::time::period::Period;
     use crate::time::{
         calendar::Calendar,
         calendars::{
@@ -427,5 +429,43 @@ mod tests {
         let weekend = Date::new(2024, 6, 2); // Sunday
         assert!(calendar.is_business_day(&weekday));
         assert!(!calendar.is_business_day(&weekend));
+    }
+
+    #[test]
+    fn test_pub_date_icap() {
+        let cal1 = Calendar::Chile(Chile::default());
+        let cal2 = Calendar::UnitedStates(UnitedStates::default());
+        let composite = Calendar::Composite(Box::new(cal1), Box::new(cal2));
+        let today = Date::new(2025, 8, 19);
+        let _today_0_bd = composite.advance(today, Period::new(0, TimeUnit::Days), None, false);
+        let today_1_bd = composite.advance(today, Period::new(1, TimeUnit::Days), None, false);
+        let today_2_bd = composite.advance(today, Period::new(2, TimeUnit::Days), None, false);
+        let tenors = vec![
+            "1W", "2W", "1M", "2M", "3M", "4M", "5M", "6M", "7M", "8M", "9M", "10M", "11M", "12M",
+            "18M", "24M",
+        ];
+
+        for tenor in tenors {
+            let t = Period::from_str(tenor).unwrap();
+            let settlement_date = match t.units() {
+                TimeUnit::Weeks => composite.adjust(
+                    today_1_bd + t,
+                    Some(BusinessDayConvention::ModifiedFollowing),
+                ),
+                TimeUnit::Months => composite.adjust(
+                    today_2_bd + t,
+                    Some(BusinessDayConvention::ModifiedFollowing),
+                ),
+                _ => todo!(),
+            };
+            let pub_date = composite.advance(
+                settlement_date,
+                Period::new(-1, TimeUnit::Days),
+                None,
+                false,
+            );
+
+            println!("{:?} - {:?}", settlement_date, pub_date);
+        }
     }
 }

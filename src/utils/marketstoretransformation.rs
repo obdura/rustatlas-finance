@@ -11,7 +11,11 @@ use crate::{
         interestrateindex::traits::InterestRateIndexTrait,
         traits::HasReferenceDate,
         yieldtermstructure::{
-            compositetermstructure::CompositeTermStructure, flatforwardtermstructure::FlatForwardTermStructure, tenorbasedspreadtermstructure::TenorBasedSpreadRateTermStructure, tenorbasedzeroratetermstructure::TenorBasedZeroRateTermStructure, zeroratetermstructure::ZeroRateTermStructure
+            compositetermstructure::CompositeTermStructure,
+            flatforwardtermstructure::FlatForwardTermStructure,
+            tenorbasedspreadtermstructure::TenorBasedSpreadRateTermStructure,
+            tenorbasedzeroratetermstructure::TenorBasedZeroRateTermStructure,
+            zeroratetermstructure::ZeroRateTermStructure,
         },
     },
     time::{date::Date, period::Period},
@@ -20,11 +24,11 @@ use crate::{
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum TransformationType {
-    ParallelShift, // apply a parallel shift to the curve -- shift is derived in forward rates -- forwards rate = fwr(base_curve + shift)
+    ParallelShift,    // apply a parallel shift to the curve -- shift is derived in forward rates -- forwards rate = fwr(base_curve + shift)
     TenorBasedShift, // apply a shift to the curve based using a tenor based term structure -- shift is derived in forward rates -- forwards rate = fwr(base_curve + shift)
-    BaseAndSpread, // overwrite the curve using a base curve and a given spread curve -- spread is not derived in forward rates -- forwards rate = fwr(base_curve) + spread_curve
+    BaseAndSpread,   // overwrite the curve using a base curve and a given spread curve -- spread is not derived in forward rates -- forwards rate = fwr(base_curve) + spread_curve
     ImplicitBaseAndSpread, // overwrite the curve using a two curves -- base curve and spread + base curve -- spread is not derived in forward rates -- forwards rate = fwr(base_curve) + spread_curve
-    NewCurveAndSpread, // create a new curve using a base curve and a spread curve -- spread is not derived iq  n forward rates -- forwards rate = fwr(base_curve) + spread_curve
+    NewCurveAndSpread,    // create a new curve using a base curve and a spread curve -- spread is not derived iq  n forward rates -- forwards rate = fwr(base_curve) + spread_curve
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -32,6 +36,16 @@ pub struct TenorBasedValues {
     pub tenor: Period,
     pub value: f64,
 }
+
+// impl From<(Period, f64)> for TenorBasedValues {
+//     fn from(tuple: (Period, f64)) -> Self {
+//         TenorBasedValues {
+//             tenor: tuple.0,
+//             value: tuple.1,
+//         }
+//     }
+// }
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CurveTransformations {
@@ -50,7 +64,7 @@ pub struct CurveTransformations {
 /// ## Parameters
 /// * `market_store` - Market store to apply the transformations.
 /// * `transformations` - List of transformations to apply to the market store.
-/// 
+///
 /// ## Disclaimer
 /// All index need to have names, otherwise the function will panic.
 ///
@@ -341,7 +355,7 @@ pub fn apply_curve_transformations(
                         .read_index()?
                         .term_structure()?;
 
-                    let spread_term_structure =  Arc::new(TenorBasedSpreadRateTermStructure::new(
+                    let spread_term_structure = Arc::new(TenorBasedSpreadRateTermStructure::new(
                         spread_base_structure,
                         base_term_structure.clone(),
                     ));
@@ -356,8 +370,6 @@ pub fn apply_curve_transformations(
                     new_market_store
                         .mut_index_store()
                         .link_term_structure(*id, composite)?;
-
-
                 }
                 TransformationType::NewCurveAndSpread => {
                     if transform.apply_to == "All" {
@@ -443,18 +455,31 @@ mod tests {
     };
 
     use crate::{
-        core::marketstore::MarketStore, currencies::enums::Currency, math::interpolation::enums::Interpolator, rates::{
-            enums::Compounding, indexstore::ReadIndex, interestrate::RateDefinition, interestrateindex::{iborindex::IborIndex, overnightindex::OvernightIndex}, traits::{HasReferenceDate, YieldProvider}, yieldtermstructure::{flatforwardtermstructure::FlatForwardTermStructure, zeroratetermstructure::ZeroRateTermStructure}
-        }, time::{
+        core::marketstore::MarketStore,
+        currencies::enums::Currency,
+        math::interpolation::enums::Interpolator,
+        rates::{
+            enums::Compounding,
+            indexstore::ReadIndex,
+            interestrate::RateDefinition,
+            interestrateindex::{iborindex::IborIndex, overnightindex::OvernightIndex},
+            traits::{HasReferenceDate, YieldProvider},
+            yieldtermstructure::{
+                flatforwardtermstructure::FlatForwardTermStructure,
+                zeroratetermstructure::ZeroRateTermStructure,
+            },
+        },
+        time::{
             date::Date,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }, utils::{errors::Result, marketstoretransformation::TenorBasedValues}
+        },
+        utils::{errors::Result, marketstoretransformation::TenorBasedValues},
     };
 
     use super::{apply_curve_transformations, CurveTransformations, TransformationType};
 
-    pub fn create_store(ref_date: Date)-> Result<MarketStore> {
+    pub fn create_store(ref_date: Date) -> Result<MarketStore> {
         let local_currency = Currency::USD;
         let mut market_store = MarketStore::new(ref_date, local_currency);
 
@@ -475,10 +500,15 @@ mod tests {
             0.05,
             RateDefinition::default(),
         ));
-        
+
         let zero_rate = Arc::new(ZeroRateTermStructure::new(
             ref_date,
-            vec![ref_date, ref_date + Period::new(1, TimeUnit::Years), ref_date + Period::new(2, TimeUnit::Years), ref_date + Period::new(3, TimeUnit::Years) ],
+            vec![
+                ref_date,
+                ref_date + Period::new(1, TimeUnit::Years),
+                ref_date + Period::new(2, TimeUnit::Years),
+                ref_date + Period::new(3, TimeUnit::Years),
+            ],
             vec![0.1, 0.03, 0.04, 0.05],
             RateDefinition::default(),
             Interpolator::Linear,
@@ -487,7 +517,12 @@ mod tests {
 
         let zero_rate_base = Arc::new(ZeroRateTermStructure::new(
             ref_date,
-            vec![ref_date, ref_date + Period::new(1, TimeUnit::Years), ref_date + Period::new(2, TimeUnit::Years), ref_date + Period::new(3, TimeUnit::Years) ],
+            vec![
+                ref_date,
+                ref_date + Period::new(1, TimeUnit::Years),
+                ref_date + Period::new(2, TimeUnit::Years),
+                ref_date + Period::new(3, TimeUnit::Years),
+            ],
             vec![0.0, 0.02, 0.03, 0.04],
             RateDefinition::default(),
             Interpolator::Linear,
@@ -683,12 +718,30 @@ mod tests {
         println!("Rate 1: {:?}", rate_1);
 
         let mut spread_term = Vec::new();
-        spread_term.push(TenorBasedValues{tenor: Period::new(0, TimeUnit::Years), value: 0.001 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(1, TimeUnit::Years), value: 0.01 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(2, TimeUnit::Years), value: 0.02 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(3, TimeUnit::Years), value: 0.03 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(4, TimeUnit::Years), value: 0.04 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(5, TimeUnit::Years), value: 0.05 as f64});
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(0, TimeUnit::Years),
+            value: 0.001 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(1, TimeUnit::Years),
+            value: 0.01 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(2, TimeUnit::Years),
+            value: 0.02 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(3, TimeUnit::Years),
+            value: 0.03 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(4, TimeUnit::Years),
+            value: 0.04 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(5, TimeUnit::Years),
+            value: 0.05 as f64,
+        });
 
         let transformations = vec![CurveTransformations {
             apply_to: "ICP_new".to_string(),
@@ -700,9 +753,8 @@ mod tests {
             spread_term_structure: Some(spread_term),
         }];
 
-
         let new_market_store = apply_curve_transformations(&market_store, transformations).unwrap();
-        
+
         let index = new_market_store
             .index_store()
             .get_index_by_name("ICP_new".to_string())
@@ -760,12 +812,12 @@ mod tests {
         }];
 
         let new_market_store = apply_curve_transformations(&market_store, transformations).unwrap();
-        
+
         let index = new_market_store
             .index_store()
             .get_index_by_name("zero_index".to_string())
             .unwrap();
-        
+
         let term_structure = index.read_index().unwrap().term_structure().unwrap();
         let fwd_start = market_store.reference_date();
         let fwd_end = market_store.reference_date() + Period::new(1, TimeUnit::Years);
@@ -805,13 +857,11 @@ mod tests {
 
         print!("fwd Rate 1: {:?}", fwd_rate_1);
 
-        let flat_rate_index = FlatForwardTermStructure::new(
-            date,
-            0.01,
-            RateDefinition::default(),
-        );
+        let flat_rate_index = FlatForwardTermStructure::new(date, 0.01, RateDefinition::default());
 
-        let fwd_rate_2 = flat_rate_index.forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual).unwrap();
+        let fwd_rate_2 = flat_rate_index
+            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .unwrap();
         println!("fwd Rate 2: {:?}", fwd_rate_2);
 
         let transformations = vec![CurveTransformations {
@@ -842,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_two_transformations() -> Result<()>{
+    fn test_apply_two_transformations() -> Result<()> {
         let date = Date::new(2024, 3, 21);
         let market_store = create_store(date)?;
 
@@ -860,33 +910,32 @@ mod tests {
 
         print!("fwd Rate 1: {:?}", fwd_rate_1);
 
-        let flat_rate_index = FlatForwardTermStructure::new(
-            date,
-            0.01,
-            RateDefinition::default(),
-        );
+        let flat_rate_index = FlatForwardTermStructure::new(date, 0.01, RateDefinition::default());
 
-        let fwd_rate_2 = flat_rate_index.forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual).unwrap();
+        let fwd_rate_2 = flat_rate_index
+            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .unwrap();
         println!("fwd Rate 2: {:?}", fwd_rate_2);
 
-        let transformations = vec![CurveTransformations {
-            apply_to: "ICP".to_string(),
-            transformation_type: TransformationType::ParallelShift,
-            shift_value: Some(0.01),
-            rate_definition: RateDefinition::default(),
-            shift_term_structure: None,
-            base_term_structure: None,
-            spread_term_structure: None,
+        let transformations = vec![
+            CurveTransformations {
+                apply_to: "ICP".to_string(),
+                transformation_type: TransformationType::ParallelShift,
+                shift_value: Some(0.01),
+                rate_definition: RateDefinition::default(),
+                shift_term_structure: None,
+                base_term_structure: None,
+                spread_term_structure: None,
             },
             CurveTransformations {
-            apply_to: "All".to_string(),
-            transformation_type: TransformationType::ParallelShift,
-            shift_value: Some(0.01),
-            rate_definition: RateDefinition::default(),
-            shift_term_structure: None,
-            base_term_structure: None,
-            spread_term_structure: None,
-            }
+                apply_to: "All".to_string(),
+                transformation_type: TransformationType::ParallelShift,
+                shift_value: Some(0.01),
+                rate_definition: RateDefinition::default(),
+                shift_term_structure: None,
+                base_term_structure: None,
+                spread_term_structure: None,
+            },
         ];
 
         let new_market_store = apply_curve_transformations(&market_store, transformations).unwrap();
@@ -901,13 +950,13 @@ mod tests {
             .unwrap();
 
         println!("fwd Rate 3: {:?}", fwd_rate_3);
-        assert!((fwd_rate_1 + 2.0*fwd_rate_2 - fwd_rate_3).abs() < 0.0000001);
+        assert!((fwd_rate_1 + 2.0 * fwd_rate_2 - fwd_rate_3).abs() < 0.0000001);
 
         Ok(())
     }
 
     #[test]
-    fn test_apply_new_curve_and_spred_and_then_parallel_shift() -> Result<()> {	
+    fn test_apply_new_curve_and_spred_and_then_parallel_shift() -> Result<()> {
         let date = Date::new(2021, 3, 21);
         let market_store = create_store(date)?;
 
@@ -926,14 +975,33 @@ mod tests {
         println!("Rate 1: {:?}", rate_1);
 
         let mut spread_term = Vec::new();
-        spread_term.push(TenorBasedValues{tenor: Period::new(0, TimeUnit::Years), value: 0.001 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(1, TimeUnit::Years), value: 0.01 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(2, TimeUnit::Years), value: 0.02 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(3, TimeUnit::Years), value: 0.03 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(4, TimeUnit::Years), value: 0.04 as f64});
-        spread_term.push(TenorBasedValues{tenor: Period::new(5, TimeUnit::Years), value: 0.05 as f64});
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(0, TimeUnit::Years),
+            value: 0.001 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(1, TimeUnit::Years),
+            value: 0.01 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(2, TimeUnit::Years),
+            value: 0.02 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(3, TimeUnit::Years),
+            value: 0.03 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(4, TimeUnit::Years),
+            value: 0.04 as f64,
+        });
+        spread_term.push(TenorBasedValues {
+            tenor: Period::new(5, TimeUnit::Years),
+            value: 0.05 as f64,
+        });
 
-        let transformations = vec![CurveTransformations {
+        let transformations = vec![
+            CurveTransformations {
                 apply_to: "ICP_new".to_string(),
                 transformation_type: TransformationType::NewCurveAndSpread,
                 shift_value: Some(0.01),
@@ -942,7 +1010,7 @@ mod tests {
                 base_term_structure: Some("ICP".to_string()),
                 spread_term_structure: Some(spread_term),
             },
-                CurveTransformations {
+            CurveTransformations {
                 apply_to: "All".to_string(),
                 transformation_type: TransformationType::ParallelShift,
                 shift_value: Some(0.02),
@@ -950,11 +1018,11 @@ mod tests {
                 shift_term_structure: None,
                 base_term_structure: None,
                 spread_term_structure: None,
-            }        
+            },
         ];
 
         let new_market_store = apply_curve_transformations(&market_store, transformations).unwrap();
-        
+
         let index = new_market_store
             .index_store()
             .get_index_by_name("ICP_new".to_string())
@@ -973,4 +1041,165 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_serialize() -> Result<()> {
+        let string = r#"{
+            "transformation_type": "NewCurveAndSpread",
+            "apply_to": "CF_CLF_PASIVO_tesoreria",
+            "base_term_structure": "CLF_COLLUSD",
+            "rate_definition": {
+              "day_counter": "Actual360",
+              "compounding": "Compounded",
+              "frequency": "Semiannual"
+            },
+            "spread_term_structure": [
+              { "tenor": "1D" , "value": 0.001 },
+              { "tenor": "7D" , "value": 0.0019},
+              { "tenor": "15D", "value": 0.002 },
+              { "tenor": "30D", "value": 0.002 }
+            ]
+        }"#;
+
+        let transformations: std::result::Result<CurveTransformations, serde_json::Error> = serde_json::from_str(string);
+        assert!(transformations.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_serialize_2() -> Result<()> {
+        let string = r#"{
+            "transformation_type": "NewCurveAndSpread",
+            "apply_to": "CF_CLF_PASIVO_tesoreria",
+            "base_term_structure": "CLF_COLLUSD",
+            "rate_definition": {
+              "day_counter": "Actual360",
+              "compounding": "Compounded",
+              "frequency": "Semiannual"
+            },
+            "spread_term_structure": [
+                ["1D", 0.001],
+                ["7D", 0.002]
+            ]
+        }"#;
+
+        let transformations: std::result::Result<CurveTransformations, serde_json::Error> = serde_json::from_str(string);
+        assert!(transformations.is_ok());
+        transformations.unwrap().spread_term_structure
+            .unwrap()
+            .iter()
+            .for_each(|v| println!("{:?}", v));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_serialize_3() -> Result<()> {
+        let string = r#"[
+            {
+              "transformation_type": "TenorBasedShift",
+              "apply_to": "ICP",
+              "rate_definition": {
+                "day_counter": "Actual360",
+                "compounding": "Simple",
+                "frequency": "Annual"
+              },
+              "shift_term_structure": [
+                ["1D", 0.001],
+                ["7D", 0.002]
+              ]
+            },
+            {
+              "transformation_type": "TenorBasedShift",
+              "apply_to": "SOFR",
+              "rate_definition": {
+                "day_counter": "Actual360",
+                "compounding": "Simple",
+                "frequency": "Annual"
+              },
+              "shift_term_structure": [
+                ["1D", 0.001],
+                ["7D", 0.002]
+              ]
+            },
+            {
+              "transformation_type": "TenorBasedShift",
+              "apply_to": "ICP_REAL",
+              "rate_definition": {
+                "day_counter": "Actual360",
+                "compounding": "Simple",
+                "frequency": "Annual"
+              },
+              "shift_term_structure": [
+                ["1D", 0.001],
+                ["7D", 0.002]
+              ]
+            },
+            {
+              "transformation_type": "TenorBasedShift",
+              "apply_to": "USD_COLLCLP",
+              "rate_definition": {
+                "day_counter": "Actual360",
+                "compounding": "Simple",
+                "frequency": "Annual"
+              },
+              "shift_term_structure": [
+                ["1D", 0.001],
+                ["7D", 0.002]
+              ]
+            },
+            {
+              "transformation_type": "TenorBasedShift",
+              "apply_to": "CLP_COLLUSD",
+              "rate_definition": {
+                "day_counter": "Actual360",
+                "compounding": "Simple",
+                "frequency": "Annual"
+              },
+              "shift_term_structure": [
+                ["1D", 0.001],
+                ["7D", 0.002]
+              ]
+            },
+            {
+              "transformation_type": "TenorBasedShift",
+              "apply_to": "CLF_COLLUSD",
+              "rate_definition": {
+                "day_counter": "Actual360",
+                "compounding": "Simple",
+                "frequency": "Annual"
+              },
+              "shift_term_structure": [
+                ["1D", 0.001],
+                ["7D", 0.002]
+              ]
+            },
+            {
+              "transformation_type": "TenorBasedShift",
+              "apply_to": "CF_CLP_ACTIVO",
+              "rate_definition": {
+                "day_counter": "Actual360",
+                "compounding": "Simple",
+                "frequency": "Annual"
+              },
+              "shift_term_structure": [
+                ["1D", 0.001],
+                ["7D", 0.002]
+              ]
+            },
+            {
+              "transformation_type": "ImplicitBaseAndSpread",
+              "apply_to": "CF_CLP_ACTIVO",
+              "base_term_structure": "ICP",
+              "rate_definition": {
+                "day_counter": "Actual360",
+                "compounding": "Compounded",
+                "frequency": "Semiannual"
+              }
+            }
+        ]"#;
+
+        let transformations: std::result::Result<Vec<CurveTransformations>, serde_json::Error> = serde_json::from_str(string);
+        assert!(transformations.is_ok());
+        Ok(())
+    }
 }

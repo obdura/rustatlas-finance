@@ -19,8 +19,24 @@ pub enum UnitedStatesMarket {
     Sofr,
 }
 
-/// # UnitedStates
-/// A calendar for the United States.
+/// # United States Calendar
+/// 
+/// A calendar implementation for United States financial markets.
+/// 
+/// ## Disclaimer
+/// This calendar is provided for reference purposes only and should be used exclusively 
+/// for instrument valuation estimates. It is NOT an official calendar and may not reflect 
+/// actual market holidays or business days. Users should verify against official sources 
+/// for production use.
+/// 
+/// ## Markets
+/// - Settlement: General settlement calendar
+/// - LiborImpact: LIBOR-related transactions
+/// - Nyse: New York Stock Exchange
+/// - GovernmentBond: US Government Bond market
+/// - Nerc: North American Electric Reliability Corporation
+/// - FederalReserve: Federal Reserve calendar
+/// - Sofr: Secured Overnight Financing Rate calendar
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnitedStates {
     market: UnitedStatesMarket,

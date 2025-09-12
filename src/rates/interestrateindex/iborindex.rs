@@ -129,6 +129,11 @@ impl FixingProvider for IborIndex {
         }
         self.fixings.insert(date, rate);
     }
+
+    fn set_fixings(&mut self, fixings: HashMap<Date, f64>) -> Result<()> {
+        self.fixings = fixings;
+        Ok(())
+    }
 }
 
 // Implement HasReferenceDate for IborIndex

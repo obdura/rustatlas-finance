@@ -55,7 +55,7 @@ pub use crate::{
         period::*,
         schedule::*,
     },
-    utils::marketstoretransformation::*,
+    utils::{marketstoretransformation::*, errors::*},
     visitors::{
         compressorvisitors::{cashflowaggregationvisitor::*, cashflowcompressorconstvisitor::*},
         flowconsolidationvisitors::{

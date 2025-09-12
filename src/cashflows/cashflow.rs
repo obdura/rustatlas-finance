@@ -253,10 +253,8 @@ use colored::*;
 impl Display for Cashflow {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let amount = self.amount().unwrap_or(0.0);
-        let currency = self.currency().map_err(|_| std::fmt::Error)?;   
-        let payment_currency = self
-            .payment_currency()
-            .map_err(|_| std::fmt::Error)?;
+        let currency = self.currency().map_err(|_| std::fmt::Error)?;
+        let payment_currency = self.payment_currency().map_err(|_| std::fmt::Error)?;
         match self {
             Cashflow::Redemption(cashflow) => write!(
                 f,
@@ -298,15 +296,17 @@ impl Display for Cashflow {
                 format!("{}", coupon.side()).cyan(),
                 "rate:".bold().yellow(),
                 format!("{:.5}", coupon.rate().rate()).cyan(),
-                "accrual ".bold().yellow(),
-                format!("{} - {}", 
+                "acc ".bold().yellow(),
+                format!(
+                    "{} - {}",
                     coupon.accrual_start_date().unwrap_or(Date::new(1970, 1, 1)),
                     coupon.accrual_end_date().unwrap_or(Date::new(1970, 1, 1))
-                ).cyan()
+                )
+                .cyan()
             ),
             Cashflow::FloatingRateCoupon(coupon) => write!(
                 f,
-                "{} {} {} {} {} {} {} {} {} {} {} {} {}",
+                "{} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
                 "Pay date:".bold().yellow(),
                 coupon.payment_date().to_string().cyan(),
                 "type:".bold().yellow(),
@@ -316,15 +316,24 @@ impl Display for Cashflow {
                 format!("{:.2} {} pay in {}", amount, currency, payment_currency).cyan(),
                 "side:".bold().yellow(),
                 format!("{}", coupon.side()).cyan(),
-                "fixing rate:".bold().yellow(),
+                "fix rate:".bold().yellow(),
                 format!("{:.5}", coupon.fixing_rate().unwrap_or(0.0)).cyan(),
-                "accrual ".bold().yellow(),
-                format!("{} - {}", 
+                "acc ".bold().yellow(),
+                format!(
+                    "{} - {}",
                     coupon.accrual_start_date().unwrap_or(Date::new(1970, 1, 1)),
                     coupon.accrual_end_date().unwrap_or(Date::new(1970, 1, 1))
-                ).cyan()
+                )
+                .cyan(),
+                "fix ".bold().yellow(),
+                format!(
+                    "{} - {}",
+                    coupon.fixing_start_date().unwrap_or(None).unwrap_or(Date::new(1970, 1, 1)),
+                    coupon.fixing_end_date().unwrap_or(None).unwrap_or(Date::new(1970, 1, 1))
+                )
+                .cyan()
             ),
-        }               
+        }
     }
 }
 
@@ -397,8 +406,14 @@ mod tests {
     fn cashflow_type_to_string() {
         assert_eq!(String::from(CashflowType::Redemption), "Redemption");
         assert_eq!(String::from(CashflowType::Disbursement), "Disbursement");
-        assert_eq!(String::from(CashflowType::FixedRateCoupon), "FixedRateCoupon");
-        assert_eq!(String::from(CashflowType::FloatingRateCoupon), "FloatingRateCoupon");
+        assert_eq!(
+            String::from(CashflowType::FixedRateCoupon),
+            "FixedRateCoupon"
+        );
+        assert_eq!(
+            String::from(CashflowType::FloatingRateCoupon),
+            "FloatingRateCoupon"
+        );
     }
 
     #[test]

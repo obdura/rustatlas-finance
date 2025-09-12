@@ -1,9 +1,14 @@
 use nalgebra::DVector;
 
 use crate::{
-    math::solver::traits::{Jacobian, Residual, SolverError}, utils::errors::{AtlasError, Result}
+    math::solver::traits::{Jacobian, Residual, SolverError},
+    utils::errors::{AtlasError, Result},
 };
 
+pub enum InvMatrixSolver {
+    Cholesky,
+    LU,
+}
 
 #[derive(Debug)]
 pub struct GaussNewtonResult {
@@ -21,7 +26,8 @@ where
     problem: P,
     max_iterations: usize,
     tolerance: f64,
-    initial_guess: DVector<f64>, 
+    initial_guess: DVector<f64>,
+    solver: InvMatrixSolver,
 }
 
 impl<P> GaussNewton<P>
@@ -34,6 +40,7 @@ where
             max_iterations: 100, // Default max iterations
             tolerance: 1e-8,     // Default tolerance
             initial_guess,
+            solver: InvMatrixSolver::LU, // Default solver
         }
     }
 
@@ -44,6 +51,11 @@ where
 
     pub fn with_tolerance(mut self, tolerance: f64) -> Self {
         self.tolerance = tolerance;
+        self
+    }
+
+    pub fn with_solver(mut self, solver: InvMatrixSolver) -> Self {
+        self.solver = solver;
         self
     }
 
@@ -67,13 +79,23 @@ where
             let jtj = &jt * &j;
             let jtr = &jt * &r;
 
-            let delta = match jtj.lu().solve(&(-jtr)) {
-                Some(sol) => sol,
-                None => {
-                    return Err(AtlasError::SolverError(
-                        SolverError::SingularMatrix("Jacobian matrix is singular".to_string()),
-                    ));
-                }
+            let delta = match self.solver {
+                InvMatrixSolver::Cholesky => match jtj.cholesky().map(|chol| chol.solve(&(-jtr))) {
+                    Some(sol) => sol,
+                    None => {
+                        return Err(AtlasError::SolverError(SolverError::SingularMatrix(
+                            "Jacobian matrix is singular".to_string(),
+                        )));
+                    }
+                },
+                InvMatrixSolver::LU => match jtj.lu().solve(&(-jtr)) {
+                    Some(sol) => sol,
+                    None => {
+                        return Err(AtlasError::SolverError(SolverError::SingularMatrix(
+                            "Jacobian matrix is singular".to_string(),
+                        )));
+                    }
+                },
             };
 
             x += delta.clone();
@@ -85,11 +107,9 @@ where
         }
 
         if !converged {
-            return Err(AtlasError::SolverError(
-                SolverError::MaxIterationsReached(
-                    "Maximum iterations reached without convergence".to_string(),
-                ),
-            ));
+            return Err(AtlasError::SolverError(SolverError::MaxIterationsReached(
+                "Maximum iterations reached without convergence".to_string(),
+            )));
         }
         let max_residual = self.problem.residual(&x)?.max();
         Ok(GaussNewtonResult {

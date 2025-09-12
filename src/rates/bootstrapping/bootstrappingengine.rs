@@ -1,9 +1,21 @@
-use std::{collections::{HashMap, HashSet}, fmt::Display};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 use crate::{
-    cashflows::traits::{Payable, RequiresFixingRate}, core::traits::{HasDiscountCurveId, HasForecastCurveId}, currencies::enums::Currency, rates::{
+    cashflows::traits::{Payable, RequiresFixingRate},
+    core::{
+        meta::MarketRequest,
+        traits::{HasDiscountCurveId, HasForecastCurveId},
+    },
+    currencies::enums::Currency,
+    rates::{
         bootstrapping::bootstrappingmarketstore::BootstrappingMarketStore, traits::HasReferenceDate,
-    }, time::date::Date, utils::errors::{AtlasError, Result}, visitors::traits::HasCashflows
+    },
+    time::date::Date,
+    utils::errors::{AtlasError, Result},
+    visitors::{indexingvisitors::indexingvisitor::IndexingVisitor, traits::{HasCashflows, Visit}},
 };
 
 /// # BootstrappingEngine
@@ -19,16 +31,18 @@ pub struct BootstrappingEngine {
     reference_date: Date,
     market_store: BootstrappingMarketStore,
     instruments: Vec<Box<dyn HasCashflows>>,
+    market_request_cache: Vec<Vec<MarketRequest>>,
     number_of_instruments: usize,
     optimization_order: Vec<(usize, usize)>,
 }
 
-impl BootstrappingEngine {
+impl BootstrappingEngine { 
     pub fn new(reference_date: Date, local_currency: Currency) -> Self {
         BootstrappingEngine {
             reference_date,
             market_store: BootstrappingMarketStore::new(reference_date, local_currency),
             instruments: Vec::new(),
+            market_request_cache: Vec::new(),
             number_of_instruments: 0,
             optimization_order: Vec::new(),
         }
@@ -66,6 +80,18 @@ impl BootstrappingEngine {
         self.optimization_order.len()
     }
 
+    pub fn market_request_cache(&self) -> &Vec<Vec<MarketRequest>> {
+        &self.market_request_cache
+    }
+    
+    pub fn market_request_cache_by_index(&self, index: &usize) -> &Vec<MarketRequest> {
+        &self.market_request_cache[*index]
+    }
+    
+    pub fn set_discount_factors(&mut self, curve_id: usize, discount_factors: Vec<f64>) -> Result<()> {
+        self.market_store.set_discount_factors(curve_id, discount_factors)
+    }
+    
     pub fn set_optimization_order(&mut self, order: Vec<(usize, usize)>) {
         self.optimization_order = order;
     }
@@ -118,11 +144,12 @@ impl BootstrappingEngine {
                 )));
             }
         }
+        self.market_store.update_discounted_exchange_rates()?;
         Ok(())
     }
 
-    pub fn relevant_instruments(&self) -> HashSet<usize> {
-        let mut relevant_instruments = HashSet::new();
+    pub fn relevant_instruments(&self) -> Vec<usize> {
+        let mut relevant_instruments = Vec::new();
         for (curve_id, element_id) in self.optimization_order.iter() {
             if let Some(curve) = self.market_store.curves_map().get(curve_id) {
                 let id = curve
@@ -130,7 +157,7 @@ impl BootstrappingEngine {
                     .get(*element_id)
                     .unwrap()
                     .unwrap();
-                relevant_instruments.insert(id);
+                relevant_instruments.push(id);
             }
         }
         relevant_instruments
@@ -161,54 +188,66 @@ impl BootstrappingEngine {
             vec![]
         }
     }
+
+    pub fn init_market_request_cache(&mut self) -> Result<()> {
+        let mut market_request_cache = Vec::new();
+        self.instruments_mut().iter_mut().try_for_each(|mut instrument| -> Result<()> {
+            let indexing_visitor = IndexingVisitor::new();
+            indexing_visitor.visit(&mut instrument)?;
+            let market_request = indexing_visitor.request();
+            market_request_cache.push(market_request);
+            Ok(())
+        })?;
+        self.market_request_cache = market_request_cache;
+        Ok(())
+    }
 }
 
-pub fn relevant_pricing_dates(instruments: &Vec<Box<dyn HasCashflows>>) -> Result<HashMap<usize,HashSet<Date>>> {
+pub fn relevant_pricing_dates(
+    instruments: &Vec<Box<dyn HasCashflows>>,
+) -> Result<HashMap<usize, HashSet<Date>>> {
     let mut pricing_dates = HashMap::new();
 
     for inst in instruments {
-        inst.cashflows()
-            .try_for_each(|cf| -> Result<()> {
-                let discount_curve_id = cf.discount_curve_id()?;
-                let payment_date = cf.payment_date();
-                let exchange_fixing_date = cf.exchange_fixing_date()?;
-                pricing_dates
-                    .entry(discount_curve_id)
-                    .or_insert_with(HashSet::new)
-                    .insert(payment_date);
-                pricing_dates
-                    .entry(discount_curve_id)
-                    .or_insert_with(HashSet::new)
-                    .insert(exchange_fixing_date);
+        inst.cashflows().try_for_each(|cf| -> Result<()> {
+            let discount_curve_id = cf.discount_curve_id()?;
+            let payment_date = cf.payment_date();
+            let exchange_fixing_date = cf.exchange_fixing_date()?;
+            pricing_dates
+                .entry(discount_curve_id)
+                .or_insert_with(HashSet::new)
+                .insert(payment_date);
+            pricing_dates
+                .entry(discount_curve_id)
+                .or_insert_with(HashSet::new)
+                .insert(exchange_fixing_date);
 
-                if let Ok(forescast_curve_id) = cf.forecast_curve_id() {
-                    if let Some(fixing_start_date) = cf.fixing_start_date()? {
-                        pricing_dates
-                            .entry(forescast_curve_id)
-                            .or_insert_with(HashSet::new)
-                            .insert(fixing_start_date);
-                    }
-                    if let Some(fixing_end_date) = cf.fixing_end_date()? {
-                        pricing_dates
-                            .entry(forescast_curve_id)
-                            .or_insert_with(HashSet::new)
-                            .insert(fixing_end_date);
-                    }
+            if let Ok(forescast_curve_id) = cf.forecast_curve_id() {
+                if let Some(fixing_start_date) = cf.fixing_start_date()? {
+                    pricing_dates
+                        .entry(forescast_curve_id)
+                        .or_insert_with(HashSet::new)
+                        .insert(fixing_start_date);
                 }
-                Ok(())
-            })?;
+                if let Some(fixing_end_date) = cf.fixing_end_date()? {
+                    pricing_dates
+                        .entry(forescast_curve_id)
+                        .or_insert_with(HashSet::new)
+                        .insert(fixing_end_date);
+                }
+            }
+            Ok(())
+        })?;
     }
 
     Ok(pricing_dates)
 }
 
-
-
 use colored::*;
 impl Display for BootstrappingEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let curves = self.market_store.curves_map();
-        let currency = self.market_store.get_exchange_rate_map();
+        let currency = self.market_store.get_discounted_exchange_rate_map();
         write!(f, "\n")?;
         writeln!(
             f,

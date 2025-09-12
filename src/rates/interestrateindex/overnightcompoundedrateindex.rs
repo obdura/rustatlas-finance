@@ -103,6 +103,11 @@ impl FixingProvider for OvernightCompoundedRateIndex {
     fn add_fixing(&mut self, date: Date, rate: f64) {
         self.overnight_index.add_fixing(date, rate)
     }
+
+    fn set_fixings(&mut self, fixings: HashMap<Date, f64>) -> Result<()> {
+        self.overnight_index.set_fixings(fixings)?;
+        Ok(())
+    }
 }
 
 // Implement HasReferenceDate for OvernightCompoundedRateIndex

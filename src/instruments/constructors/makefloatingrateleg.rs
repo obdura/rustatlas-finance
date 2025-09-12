@@ -48,8 +48,12 @@ pub struct MakeFloatingRateLeg {
     forecast_curve_id: Option<usize>,
 
     calendar: Option<Calendar>,
-    business_day_convention: Option<BusinessDayConvention>,
-    termination_business_day_convention: Option<BusinessDayConvention>,
+    business_day_convention: Option<BusinessDayConvention>, // for accrual dates
+    termination_business_day_convention: Option<BusinessDayConvention>, // for accrual dates
+
+    business_day_convention_fixing_dates: Option<BusinessDayConvention>, // for fixing dates
+    termination_business_day_convention_fixing_dates: Option<BusinessDayConvention>, // for fixing dates
+
     date_generation_rule: Option<DateGenerationRule>,
 
     initial_flow: bool,
@@ -78,8 +82,9 @@ impl MakeFloatingRateLeg {
             calendar: None,
             business_day_convention: None,
             termination_business_day_convention: None,
+            business_day_convention_fixing_dates: None,
+            termination_business_day_convention_fixing_dates: None,
             date_generation_rule: None,
-
             initial_flow: false,
             final_flow: true,
         }
@@ -103,6 +108,23 @@ impl MakeFloatingRateLeg {
         termination_business_day_convention: Option<BusinessDayConvention>,
     ) -> MakeFloatingRateLeg {
         self.termination_business_day_convention = termination_business_day_convention;
+        self
+    }
+
+    pub fn with_business_day_convention_fixing_dates(
+        mut self,
+        business_day_convention_fixing_dates: Option<BusinessDayConvention>,
+    ) -> MakeFloatingRateLeg {
+        self.business_day_convention_fixing_dates = business_day_convention_fixing_dates;
+        self
+    }
+
+    pub fn with_termination_business_day_convention_fixing_dates(
+        mut self,
+        termination_business_day_convention_fixing_dates: Option<BusinessDayConvention>,
+    ) -> MakeFloatingRateLeg {
+        self.termination_business_day_convention_fixing_dates =
+            termination_business_day_convention_fixing_dates;
         self
     }
 
@@ -304,13 +326,35 @@ impl MakeFloatingRateLeg {
             .termination_business_day_convention
             .unwrap_or(business_day_convention);
 
+        let business_day_convention_fixing_dates = self
+            .business_day_convention_fixing_dates
+            .unwrap_or(business_day_convention);
+
+        let termination_business_day_convention_fixing_dates = self
+            .termination_business_day_convention_fixing_dates
+            .unwrap_or(business_day_convention_fixing_dates);
+
         let date_generation_rule = self
             .date_generation_rule
             .unwrap_or(DateGenerationRule::Backward);
 
         match structure {
             Structure::Bullet | Structure::Zero => {
-                // make schedule
+                // make schedule for fixing dates
+                let mut schedule_builder =
+                    MakeSchedule::new(adjusted_start_date, adjusted_end_date)
+                        .with_frequency(payment_frequency)
+                        .with_calendar(calendar.clone())
+                        .with_convention(business_day_convention_fixing_dates)
+                        .with_termination_date_convention(
+                            termination_business_day_convention_fixing_dates,
+                        )
+                        .with_rule(date_generation_rule);
+
+                let fixing_schedule = schedule_builder.build()?;
+                let fixings_dates = fixing_schedule.dates();
+
+                // make schedule for accrual dates
                 let mut schedule_builder =
                     MakeSchedule::new(adjusted_start_date, adjusted_end_date)
                         .with_frequency(payment_frequency)
@@ -319,25 +363,25 @@ impl MakeFloatingRateLeg {
                         .with_termination_date_convention(termination_business_day_convention)
                         .with_rule(date_generation_rule);
 
-                let fixing_schedule = schedule_builder.build()?;
-                let fixings_dates = fixing_schedule.dates();
-
-                let maturity_date = fixings_dates.last().ok_or(AtlasError::ValueNotSetErr(
-                    "Fixing schedule should have at least one date".into(),
-                ))?;
+                let accrual_schedule = schedule_builder.build()?;
+                let accrual_dates = accrual_schedule.dates();
 
                 let payment_dates = match self.payment_lag {
-                    Some(lag) => fixings_dates
+                    Some(lag) => accrual_dates
                         .iter()
                         .map(|d| {
                             calendar.advance(*d, lag, Some(BusinessDayConvention::Following), false)
                         })
                         .collect(),
-                    None => fixings_dates.clone(),
+                    None => accrual_dates.clone(),
                 };
 
                 let last_payment_date = payment_dates.last().ok_or(AtlasError::ValueNotSetErr(
                     "Payment dates should have at least one date".into(),
+                ))?;
+
+                let maturity_date = accrual_dates.last().ok_or(AtlasError::ValueNotSetErr(
+                    "Accrual schedule should have at least one date".into(),
                 ))?;
 
                 let first_date: Vec<Date> = vec![*payment_dates.first().unwrap()];
@@ -370,7 +414,7 @@ impl MakeFloatingRateLeg {
 
                 build_coupons_from_notionals(
                     &mut cashflows,
-                    &fixings_dates,
+                    &accrual_dates,
                     &fixings_dates,
                     &payment_dates,
                     &notionals,
@@ -457,14 +501,17 @@ mod tests {
         cashflows::{
             cashflow::Cashflow,
             side::Side,
-            traits::{Payable, RequiresFixingRate},
+            traits::{InterestAccrual, Payable, RequiresFixingRate},
         },
         currencies::enums::Currency,
         instruments::{constructors::makefloatingrateleg::MakeFloatingRateLeg, traits::Structure},
         rates::{enums::Compounding, interestrate::RateDefinition},
         time::{
             calendar::Calendar,
-            calendars::unitedstates::{UnitedStates, UnitedStatesMarket},
+            calendars::{
+                chile::Chile,
+                unitedstates::{UnitedStates, UnitedStatesMarket},
+            },
             date::Date,
             daycounter::DayCounter,
             enums::{BusinessDayConvention, Frequency, TimeUnit},
@@ -710,5 +757,84 @@ mod tests {
                 _ => (),
             };
         }
+    }
+
+    #[test]
+    fn test_make_floating_rate_leg_pay_zero_structure_with_settlement() {
+        let start_date = Date::new(2025, 8, 11);
+        let rate_defintion = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let rate_definition = RateDefinition::default();
+
+        let calendar = Calendar::Chile(Chile::default());
+        let notional = 1_000_000.0;
+        let instrument = MakeFloatingRateLeg::new()
+            .with_calendar(Some(calendar))
+            .with_negotiation_date(start_date)
+            .with_tenor(Period::new(1, TimeUnit::Months))
+            .with_rate_definition(rate_defintion)
+            .with_settlement_period(Period::new(2, TimeUnit::Days))
+            .with_payment_lag(Period::new(0, TimeUnit::Days))
+            .with_rate_definition(rate_definition)
+            .with_notional(notional)
+            .with_side(Side::Pay)
+            .with_currency(Currency::USD)
+            .zero()
+            .build()
+            .unwrap();
+
+        assert!(instrument.last_payment_date() == Date::new(2025, 9, 15));
+        instrument.cashflows().for_each(|cf| {
+            assert!(cf.payment_date() == Date::new(2025, 9, 15));
+            match cf {
+                Cashflow::FixedRateCoupon(coupon) => {
+                    assert!(coupon.accrual_start_date().unwrap() == Date::new(2025, 8, 13));
+                    assert!(coupon.accrual_end_date().unwrap() == Date::new(2025, 9, 13));
+                }
+                _ => (),
+            };
+        });
+    }
+
+    #[test]
+    fn test_make_floating_rate_leg_pay_bullet_structure_with_settlement() {
+        let start_date = Date::new(2025, 8, 11);
+        let rate_defintion = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let rate_definition = RateDefinition::default();
+
+        let calendar = Calendar::Chile(Chile::default());
+        let notional = 1_000_000.0;
+        let instrument = MakeFloatingRateLeg::new()
+            .with_calendar(Some(calendar))
+            .with_negotiation_date(start_date)
+            .with_tenor(Period::new(8, TimeUnit::Years))
+            .with_rate_definition(rate_defintion)
+            .with_settlement_period(Period::new(2, TimeUnit::Days))
+            .with_business_day_convention(Some(BusinessDayConvention::ModifiedFollowing))
+            .with_business_day_convention_fixing_dates(Some(BusinessDayConvention::Unadjusted))
+            .with_payment_lag(Period::new(0, TimeUnit::Days))
+            .with_rate_definition(rate_definition)
+            .with_notional(notional)
+            .with_side(Side::Pay)
+            .with_payment_frequency(Frequency::Annual)
+            .with_currency(Currency::USD)
+            .bullet()
+            .build()
+            .unwrap();
+        assert!(instrument.payment_frequency() == Frequency::Annual);
+        assert!(instrument.structure() == Structure::Bullet);
+        instrument
+            .cashflows()
+            .filter(|cf| cf.payment_date() == Date::new(2025, 8, 13))
+            .for_each(|cf| {
+                assert!(cf.accrual_start_date().unwrap() != cf.fixing_start_date().unwrap().unwrap());
+            });
     }
 }

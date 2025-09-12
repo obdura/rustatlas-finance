@@ -34,13 +34,15 @@ use crate::{
 /// * `currency_curve` - A map of curves used por currency projections if is needed
 /// * `exchange_rate_map` - A map of exchange rates between currencies
 /// * `exchange_rate_cache` - A cache for exchange rates to avoid recomputation
+#[derive(Clone)]
 pub struct BootstrappingMarketStore {
     reference_date: Date,
     local_currency: Currency,
     curves_map: HashMap<usize, BootstrappingCurve>,
     currency_curve: HashMap<Currency, usize>,
-    exchange_rate_map: HashMap<(Currency, Currency), f64>,
-    exchange_rate_cache: Arc<Mutex<HashMap<(Currency, Currency), f64>>>,
+    exchange_rate_map: HashMap<(Currency, Currency), (Date, f64)>,
+    discounted_exchange_rate_map: HashMap<(Currency, Currency), f64>,
+    discounted_exchange_rate_cache: Arc<Mutex<HashMap<(Currency, Currency), f64>>>,
 }
 
 impl BootstrappingMarketStore {
@@ -51,7 +53,8 @@ impl BootstrappingMarketStore {
             curves_map: HashMap::new(),
             currency_curve: HashMap::new(),
             exchange_rate_map: HashMap::new(),
-            exchange_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            discounted_exchange_rate_map: HashMap::new(),
+            discounted_exchange_rate_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -63,7 +66,11 @@ impl BootstrappingMarketStore {
         self.local_currency
     }
 
-    pub fn exchange_rate_map(&self) -> &HashMap<(Currency, Currency), f64> {
+    pub fn discounted_exchange_rate_map(&self) -> &HashMap<(Currency, Currency), f64> {
+        &self.discounted_exchange_rate_map
+    }
+
+    pub fn exchange_rate_map(&self) -> &HashMap<(Currency, Currency), (Date, f64)> {
         &self.exchange_rate_map
     }
 
@@ -90,27 +97,49 @@ impl BootstrappingMarketStore {
             )))
     }
 
-    pub fn with_exchange_rates(
+    pub fn add_discounted_exchange_rate(
         &mut self,
-        exchange_rate_map: HashMap<(Currency, Currency), f64>,
-    ) -> &mut Self {
-        self.exchange_rate_map = exchange_rate_map;
-        self
+        currency1: Currency,
+        currency2: Currency,
+        rate: f64,
+    ) {
+        self.discounted_exchange_rate_map
+            .insert((currency1, currency2), rate);
+        self.exchange_rate_map
+            .insert((currency1, currency2), (self.reference_date, rate));
     }
 
-    pub fn add_exchange_rate(&mut self, currency1: Currency, currency2: Currency, rate: f64) {
-        self.exchange_rate_map.insert((currency1, currency2), rate);
+    pub fn add_exchange_rate(
+        &mut self,
+        currency1: Currency,
+        currency2: Currency,
+        rate: f64,
+        date: Date,
+    ) -> Result<()> {
+        if date < self.reference_date {
+            return Err(AtlasError::BootstrappingErr(format!(
+                "Date exchange rate {} is before reference date {}",
+                date, self.reference_date
+            )));
+        }
+        self.exchange_rate_map
+            .insert((currency1, currency2), (date, rate));
+        Ok(())
     }
 
-    pub fn get_exchange_rate_map(&self) -> &HashMap<(Currency, Currency), f64> {
-        &self.exchange_rate_map
+    pub fn get_discounted_exchange_rate_map(&self) -> &HashMap<(Currency, Currency), f64> {
+        &self.discounted_exchange_rate_map
     }
 
     pub fn get_currency_curve_map(&self) -> &HashMap<Currency, usize> {
         &self.currency_curve
     }
 
-    pub fn get_exchange_rate(&self, first_ccy: Currency, second_ccy: Currency) -> Result<f64> {
+    pub fn get_discounted_exchange_rate(
+        &self,
+        first_ccy: Currency,
+        second_ccy: Currency,
+    ) -> Result<f64> {
         let first_ccy = first_ccy;
         let second_ccy = second_ccy;
 
@@ -119,7 +148,12 @@ impl BootstrappingMarketStore {
         }
 
         let cache_key = (first_ccy, second_ccy);
-        if let Some(cached_rate) = self.exchange_rate_cache.lock().unwrap().get(&cache_key) {
+        if let Some(cached_rate) = self
+            .discounted_exchange_rate_cache
+            .lock()
+            .unwrap()
+            .get(&cache_key)
+        {
             return Ok(*cached_rate);
         }
 
@@ -128,9 +162,9 @@ impl BootstrappingMarketStore {
         q.push_back((first_ccy, 1.0));
         visited.insert(first_ccy);
 
-        let mut mutable_cache = self.exchange_rate_cache.lock().unwrap();
+        let mut mutable_cache = self.discounted_exchange_rate_cache.lock().unwrap();
         while let Some((current_ccy, rate)) = q.pop_front() {
-            for (&(source, dest), &map_rate) in &self.exchange_rate_map {
+            for (&(source, dest), &map_rate) in &self.discounted_exchange_rate_map {
                 if source == current_ccy && !visited.contains(&dest) {
                     let new_rate = rate * map_rate;
                     if dest == second_ccy {
@@ -165,6 +199,9 @@ impl BootstrappingMarketStore {
         date: Date,
     ) -> Result<f64> {
         if first_currency == second_currency {
+            return Ok(1.0);
+        }
+        if date == self.reference_date {
             return Ok(1.0);
         }
         let first_id = self.get_currency_curve(first_currency)?;
@@ -224,12 +261,79 @@ impl BootstrappingMarketStore {
         Ok(())
     }
 
+    pub fn add_curve_with_details(
+        &mut self,
+        id: usize,
+        currency: Currency,
+        name: String,
+        day_counter: Option<DayCounter>,
+        interpolator: Option<Interpolator>,
+        enable_extrapolation: Option<bool>,
+        first_pillar_interpolator_inherited: Option<bool>,
+    ) -> Result<()> {
+        if self.curves_map.contains_key(&id) {
+            return Err(AtlasError::BootstrappingErr(format!(
+                "Curve with id {} already exists",
+                id
+            )));
+        }
+        let mut curve = BootstrappingCurve::new(self.reference_date, id, currency);
+        curve.set_name(name);
+        match day_counter {
+            Some(day_counter) => curve.set_day_counter(day_counter),
+            None => {}
+        }
+        match interpolator {
+            Some(interpolator) => curve.set_interpolator(interpolator),
+            None => {}
+        }
+        match enable_extrapolation {
+            Some(enable_extrapolation) => curve.set_enable_extrapolation(enable_extrapolation),
+            None => {}
+        }
+        match first_pillar_interpolator_inherited {
+            Some(first_pillar_interpolator_inherited) => {
+                curve.set_first_pillar_interpolator_inherited(first_pillar_interpolator_inherited)
+            }
+            None => {}
+        }
+        self.curves_map.insert(id, curve);
+        Ok(())
+    }
+
     pub fn curves_map(&self) -> &HashMap<usize, BootstrappingCurve> {
         &self.curves_map
     }
 
     pub fn curves_map_mut(&mut self) -> &mut HashMap<usize, BootstrappingCurve> {
         &mut self.curves_map
+    }
+
+    pub fn update_discounted_exchange_rates(&mut self) -> Result<()> {
+        let mut new_discounted_exchange_rate_map = HashMap::new();
+        {
+            for (&(first_ccy, second_ccy), &(date, rate)) in &self.exchange_rate_map {
+                let currency_forescast_factor =
+                    self.currency_forescast_factor(first_ccy, second_ccy, date)?;
+                let new_rate = rate / currency_forescast_factor;
+                new_discounted_exchange_rate_map.insert((first_ccy, second_ccy), new_rate);
+            }
+        }
+        //update discounted exchange rate map and clear cache
+        self.discounted_exchange_rate_map = new_discounted_exchange_rate_map;
+        self.discounted_exchange_rate_cache.lock().unwrap().clear();
+        Ok(())
+    }
+
+    pub fn set_discount_factors(&mut self, id: usize, discount_factors: Vec<f64>) -> Result<()> {
+        self.curves_map
+            .get_mut(&id)
+            .ok_or(AtlasError::NotFoundErr(format!(
+                "Curve with id {} not found",
+                id
+            )))?
+            .set_discount_factors(discount_factors);
+        Ok(())
     }
 }
 
@@ -243,7 +347,7 @@ impl TryFrom<&BootstrappingMarketStore> for MarketStore {
         let local_currency = value.local_currency();
 
         // Create a new ExchangeRateStore with the bootstrapping exchange rates
-        let bootstrapping_exchange_rate_map = value.get_exchange_rate_map().clone();
+        let bootstrapping_exchange_rate_map = value.get_discounted_exchange_rate_map().clone();
         let mut new_exchange_rate_store = ExchangeRateStore::new(ref_date);
         new_exchange_rate_store.set_exchange_rates(bootstrapping_exchange_rate_map)?;
 
@@ -277,15 +381,18 @@ impl TryFrom<&BootstrappingMarketStore> for MarketStore {
                 .with_currency(Some(currency))
                 .with_rate_definition(rete_definition)
                 .with_term_structure(discount_term_structure)
-                .with_name(Some(curve.name().cloned().unwrap_or_else(|| format!("Bootstrapping Curve {}", id))));
+                .with_name(Some(
+                    curve
+                        .name()
+                        .cloned()
+                        .unwrap_or_else(|| format!("Bootstrapping Curve {}", id)),
+                ));
             new_index_store.add_index(*id, Arc::new(RwLock::new(index)))?;
         }
 
         let mut market_store = MarketStore::new(ref_date, local_currency);
         market_store.set_exchange_rate_store(new_exchange_rate_store)?;
         market_store.set_index_store(new_index_store)?;
-
-
 
         Ok(market_store)
     }
@@ -307,6 +414,7 @@ impl TryFrom<&BootstrappingMarketStore> for MarketStore {
 /// * `day_counter` - The day counter used for calculating year fractions
 /// * `interpolator` - The interpolator used for calculating discount factors
 /// * `enable_extrapolation` - Whether to enable extrapolation for the interpolator
+#[derive(Clone)]
 pub struct BootstrappingCurve {
     reference_date: Date,
     id: usize,
@@ -319,6 +427,7 @@ pub struct BootstrappingCurve {
     day_counter: DayCounter,
     interpolator: Interpolator,
     enable_extrapolation: bool,
+    first_pillar_interpolator_inherited: bool,
 }
 
 impl BootstrappingCurve {
@@ -335,6 +444,7 @@ impl BootstrappingCurve {
             day_counter: DayCounter::Actual360, // Default day counter
             interpolator: Interpolator::LogLinear, // Default interpolator
             enable_extrapolation: true, // Default to true
+            first_pillar_interpolator_inherited: true,
         }
     }
 
@@ -398,6 +508,14 @@ impl BootstrappingCurve {
         self.enable_extrapolation = enable;
     }
 
+    pub fn set_first_pillar_interpolator_inherited(&mut self, enable: bool) {
+        self.first_pillar_interpolator_inherited = enable;
+    }
+
+    pub fn set_discount_factors(&mut self, discount_factors: Vec<f64>) {
+        self.discount_factors = discount_factors;
+    }
+
     pub fn add_date(&mut self, date: Date, related_instrument_index: usize) -> Result<()> {
         if date < self.reference_date {
             return Err(AtlasError::BootstrappingErr(
@@ -448,6 +566,27 @@ impl YieldProvider for BootstrappingCurve {
         let year_fraction = self
             .day_counter()
             .year_fraction(self.reference_date(), date);
+
+        if !self.first_pillar_interpolator_inherited {
+            // obtener segundo valor o devolver error si no existe
+            let second_yf = self
+                .year_fractions
+                .get(1)
+                .ok_or(AtlasError::BootstrappingErr(format!(
+                    "Bootstrapping curve {} does have second point",
+                    self.id
+                )))?;
+            if &year_fraction < second_yf {
+                let discount_factor = self.interpolator.interpolate(
+                    *second_yf,
+                    &self.year_fractions,
+                    &self.discount_factors,
+                    true,
+                )?;
+                return Ok(discount_factor.powf(year_fraction / *second_yf));
+            }
+            
+        }
 
         let discount_factor = self.interpolator.interpolate(
             year_fraction,
@@ -615,7 +754,7 @@ impl<'a> Model for BootstrappingModel<'a> {
 
         let spot = self
             .market_store
-            .get_exchange_rate(first_currency, second_currency)?;
+            .get_discounted_exchange_rate(first_currency, second_currency)?;
 
         match fx.reference_date() {
             Some(date) => {
@@ -642,11 +781,17 @@ impl<'a> Model for BootstrappingModel<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        core::marketstore::MarketStore, currencies::enums::Currency, rates::{
+        core::marketstore::MarketStore,
+        currencies::enums::Currency,
+        rates::{
             bootstrapping::bootstrappingmarketstore::{
                 BootstrappingCurve, BootstrappingMarketStore,
-            }, indexstore::ReadIndex, traits::{HasReferenceDate, YieldProvider}
-        }, time::date::Date, utils::errors::Result
+            },
+            indexstore::ReadIndex,
+            traits::{HasReferenceDate, YieldProvider},
+        },
+        time::date::Date,
+        utils::errors::Result,
     };
 
     #[test]
@@ -750,7 +895,7 @@ mod tests {
         let ref_date = Date::new(2022, 1, 1);
         let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
         let rate = store
-            .get_exchange_rate(Currency::USD, Currency::USD)
+            .get_discounted_exchange_rate(Currency::USD, Currency::USD)
             .unwrap();
         assert_eq!(rate, 1.0);
     }
@@ -759,13 +904,13 @@ mod tests {
     fn test_exchange_rate_direct() {
         let ref_date = Date::new(2022, 1, 1);
         let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
-        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+        store.add_discounted_exchange_rate(Currency::USD, Currency::EUR, 0.9);
         let rate = store
-            .get_exchange_rate(Currency::USD, Currency::EUR)
+            .get_discounted_exchange_rate(Currency::USD, Currency::EUR)
             .unwrap();
         assert_eq!(rate, 0.9);
         let reverse_rate = store
-            .get_exchange_rate(Currency::EUR, Currency::USD)
+            .get_discounted_exchange_rate(Currency::EUR, Currency::USD)
             .unwrap();
         assert!((reverse_rate - 1.0 / 0.9).abs() < 1e-12);
     }
@@ -774,10 +919,10 @@ mod tests {
     fn test_exchange_rate_indirect() {
         let ref_date = Date::new(2022, 1, 1);
         let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
-        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
-        store.add_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
+        store.add_discounted_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+        store.add_discounted_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
         let rate = store
-            .get_exchange_rate(Currency::USD, Currency::GBP)
+            .get_discounted_exchange_rate(Currency::USD, Currency::GBP)
             .unwrap();
         assert!((rate - 0.9 * 0.8).abs() < 1e-12);
     }
@@ -786,7 +931,7 @@ mod tests {
     fn test_exchange_rate_not_found() {
         let ref_date = Date::new(2022, 1, 1);
         let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
-        let result = store.get_exchange_rate(Currency::USD, Currency::EUR);
+        let result = store.get_discounted_exchange_rate(Currency::USD, Currency::EUR);
         assert!(result.is_err());
     }
 
@@ -807,20 +952,6 @@ mod tests {
         let store = BootstrappingMarketStore::new(ref_date, Currency::USD);
         let result = store.get_currency_curve(Currency::EUR);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_with_exchange_rates_overwrites() {
-        let ref_date = Date::new(2022, 1, 1);
-        let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
-        let mut rates = std::collections::HashMap::new();
-        rates.insert((Currency::USD, Currency::EUR), 0.9);
-        store.with_exchange_rates(rates.clone());
-        assert_eq!(store.get_exchange_rate_map().clone(), rates);
-        let mut new_rates = std::collections::HashMap::new();
-        new_rates.insert((Currency::USD, Currency::GBP), 0.8);
-        store.with_exchange_rates(new_rates.clone());
-        assert_eq!(store.get_exchange_rate_map().clone(), new_rates);
     }
 
     #[test]
@@ -863,16 +994,16 @@ mod tests {
     fn test_exchange_rate_cache() {
         let ref_date = Date::new(2022, 1, 1);
         let mut store = BootstrappingMarketStore::new(ref_date, Currency::USD);
-        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
-        store.add_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
+        store.add_discounted_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+        store.add_discounted_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
         // First call populates cache
         let rate1 = store
-            .get_exchange_rate(Currency::USD, Currency::GBP)
+            .get_discounted_exchange_rate(Currency::USD, Currency::GBP)
             .unwrap();
         // Remove from map to ensure cache is used
-        store.exchange_rate_map.clear();
+        store.discounted_exchange_rate_map.clear();
         let rate2 = store
-            .get_exchange_rate(Currency::USD, Currency::GBP)
+            .get_discounted_exchange_rate(Currency::USD, Currency::GBP)
             .unwrap();
         assert!((rate1 - rate2).abs() < 1e-12);
     }
@@ -906,7 +1037,7 @@ mod tests {
         let local_currency = Currency::USD;
         let mut store = BootstrappingMarketStore::new(ref_date, local_currency);
         store.add_curve(1, Currency::USD)?;
-        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+        store.add_discounted_exchange_rate(Currency::USD, Currency::EUR, 0.9);
 
         let market_store: MarketStore = (&store).try_into()?;
         assert_eq!(market_store.reference_date(), ref_date);
@@ -920,19 +1051,21 @@ mod tests {
         let local_currency = Currency::USD;
         let mut store = BootstrappingMarketStore::new(ref_date, local_currency);
         store.add_curve(1, Currency::USD)?;
-        store.add_exchange_rate(Currency::USD, Currency::EUR, 0.9);
-        store.add_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
+        store.add_discounted_exchange_rate(Currency::USD, Currency::EUR, 0.9);
+        store.add_discounted_exchange_rate(Currency::EUR, Currency::GBP, 0.8);
 
         let market_store: MarketStore = (&store).try_into()?;
         assert_eq!(market_store.reference_date(), ref_date);
         assert_eq!(market_store.local_currency(), local_currency);
 
-        let fx = market_store.exchange_rate_store()
+        let fx = market_store
+            .exchange_rate_store()
             .get_exchange_rate(Currency::USD, Currency::EUR)
             .unwrap();
-    
+
         assert!((fx - 0.9).abs() < 1e-12);
-        let fx = market_store.exchange_rate_store()
+        let fx = market_store
+            .exchange_rate_store()
             .get_exchange_rate(Currency::EUR, Currency::GBP)
             .unwrap();
         assert!((fx - 0.8).abs() < 1e-12);
@@ -943,5 +1076,4 @@ mod tests {
 
         Ok(())
     }
-
 }

@@ -9,7 +9,7 @@ use crate::{
     },
     utils::errors::Result,
     visitors::{
-        indexingvisitors::{fixingvisitor::FixingVisitor, indexingvisitor::IndexingVisitor},
+        indexingvisitors::fixingvisitor::FixingVisitor,
         npvvisitors::npvconstvisitor::NPVConstVisitor,
         traits::{ConstVisit, Visit},
     },
@@ -28,26 +28,31 @@ use std::cell::RefCell;
 ///
 pub struct BootstrappingSolver<'a> {
     engine: &'a RefCell<BootstrappingEngine>,
-    indexer: RefCell<IndexingVisitor>, // Visitor to index cashflows and generate market requests
     optimization_order: Option<Vec<Vec<(usize, usize)>>>,
     max_iterations: usize, // Maximum number of iterations for the optimization
     tolerance: f64,        // Tolerance for convergence
     epsilon: f64,          // Epsilon for numerical differentiation
-    inv_epsilon: f64, // Inverse epsilon for numerical differentiation
+    inv_epsilon: f64,      // Inverse epsilon for numerical differentiation
+    jacobian_non_zero_cache: RefCell<Option<Vec<Vec<usize>>>>, // Cache for the non-zero elements of the Jacobian matrix
+    print: bool,
 }
 
 impl<'a> BootstrappingSolver<'a> {
     pub fn new(engine: &'a RefCell<BootstrappingEngine>) -> Result<Self> {
-        let indexer = IndexingVisitor::new();
         Ok(BootstrappingSolver {
             engine,
-            indexer: RefCell::new(indexer),
             optimization_order: None,
             max_iterations: 500,
             tolerance: 1e-14,
-            epsilon: 1e-12,
-            inv_epsilon: 1.0 / 1e-12,
+            epsilon: 1e-10,
+            inv_epsilon: 1.0 / 1e-10,
+            jacobian_non_zero_cache: RefCell::new(None),
+            print: false,
         })
+    }
+
+    pub fn jacobian_non_zero_cache(&self) -> Option<Vec<Vec<usize>>> {
+        self.jacobian_non_zero_cache.borrow().clone()
     }
 
     pub fn with_optimization_order(mut self, optimization_order: Vec<Vec<(usize, usize)>>) -> Self {
@@ -66,7 +71,6 @@ impl<'a> BootstrappingSolver<'a> {
                     .collect()
             })
             .collect();
-
         self.optimization_order = Some(order);
         self
     }
@@ -87,6 +91,14 @@ impl<'a> BootstrappingSolver<'a> {
         self
     }
 
+    pub fn set_jacobian_non_zero_cache(
+        &mut self,
+        jacobian_non_zero_cache: Option<Vec<Vec<usize>>>,
+    ) {
+        self.jacobian_non_zero_cache
+            .replace(jacobian_non_zero_cache);
+    }
+
     pub fn configure(&mut self, max_iterations: usize, tolerance: f64, epsilon: f64) -> &mut Self {
         self.max_iterations = max_iterations;
         self.tolerance = tolerance;
@@ -102,10 +114,12 @@ impl<'a> BootstrappingSolver<'a> {
             .with_tolerance(self.tolerance);
         let res = solver.solve()?;
         let solution = res.solution;
-        println!(
-            "\t\t Optimization completed with n iterations: {} and max residual: {:.2e}",
-            res.iterations, res.max_residual
-        );
+        if self.print {
+            println!(
+                "\t\t Optimization completed with n iterations: {} and max residual: {:.2e}",
+                res.iterations, res.max_residual
+            );
+        }
         let mut engine = self.engine.borrow_mut();
         engine.update_discount_factors(solution.as_slice())?;
         Ok(())
@@ -113,7 +127,9 @@ impl<'a> BootstrappingSolver<'a> {
 
     pub fn run(&self) -> Result<()> {
         let start_time = std::time::Instant::now();
-        println!("\t Starting bootstrapping optimization...");
+        if self.print {
+            println!("\t Starting bootstrapping optimization...");
+        }
 
         let optimization_orders = match &self.optimization_order {
             Some(orders) if !orders.is_empty() => orders.clone(),
@@ -123,58 +139,164 @@ impl<'a> BootstrappingSolver<'a> {
             }
         };
 
+        self.engine.borrow_mut().init_market_request_cache()?;
         for order in optimization_orders {
             self.engine.borrow_mut().set_optimization_order(order);
-            self.update_indexer()?;
+            self.engine
+                .borrow_mut()
+                .market_store_mut()
+                .update_discounted_exchange_rates()?;
+            self.jacobian_non_zero_cache.replace(None);
             self.run_optimization()?;
         }
 
         let duration = start_time.elapsed();
-        println!("\t Optimization took {:?}", duration);
-        Ok(())
-    }
-
-    pub fn update_indexer(&self) -> Result<()> {
-        let new_indexer = IndexingVisitor::new();
-        let mut engine = self.engine.borrow_mut();
-        let relevant_instruments = engine.relevant_instruments();
-        engine
-            .instruments_mut()
-            .iter_mut()
-            .enumerate()
-            .filter(|(index, _)| relevant_instruments.contains(index))
-            .try_for_each(|(_, mut instrument)| new_indexer.visit(&mut instrument))?;
-
-        let mut indexer = self.indexer.borrow_mut();
-        *indexer = new_indexer;
+        if self.print {
+            println!("\t Optimization took {:?}", duration);
+        }
         Ok(())
     }
 
     pub fn compute_residuals(&self, discount_factors: &Vec<f64>) -> Result<Vec<f64>> {
-        let mut engine = self.engine.borrow_mut();
-        engine.update_discount_factors(discount_factors)?;
+        let data_map = {
+            let mut engine = self.engine.borrow_mut();
+            engine.update_discount_factors(discount_factors)?;
+            let relevant_instruments = engine.relevant_instruments();
+            let market_request_cache = engine.market_request_cache();
+            let model = BootstrappingModel::new(engine.market_store());
 
-        let relevant_instruments = engine.relevant_instruments();
+            let data: Vec<_> = relevant_instruments
+                .iter()
+                .map(|&relevant_instrument| {
+                    let market_request = &market_request_cache[relevant_instrument];
+                    let data_row = model.gen_market_data(market_request)?;
+                    Ok((relevant_instrument, data_row))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            data
+        };
 
-        let model = BootstrappingModel::new(engine.market_store());
-        let indexer = self.indexer.borrow_mut();
-        let data = model.gen_market_data(&indexer.request()).unwrap();
-        let fixing_visitor = FixingVisitor::new(&data);
-        let npv_visitor = NPVConstVisitor::new(&data, true);
-        
-        let residuals = engine
-            .instruments_mut()
-            .iter_mut()
-            .enumerate()
-            .filter(|(index, _)| relevant_instruments.contains(index))
-            .map(|(_, mut instrument)| {
-                fixing_visitor.visit(&mut instrument)?;
-                let npv = npv_visitor.visit(&instrument)?;
-                Ok(npv)
-            })
-            .collect::<Result<Vec<f64>>>()?;
+        let residuals = {
+            let mut engine = self.engine.borrow_mut();
+            let instruments = engine.instruments_mut();
+
+            data_map
+                .iter()
+                .map(|(index, data)| {
+                    let mut instrument = &mut instruments[*index];
+                    let fixing_visitor = FixingVisitor::new(data);
+                    let npv_visitor = NPVConstVisitor::new(data, true);
+                    fixing_visitor.visit(&mut instrument)?;
+                    let npv = npv_visitor.visit(&mut instrument)?;
+                    Ok(npv)
+                })
+                .collect::<Result<Vec<f64>>>()?
+        };
 
         Ok(residuals)
+    }
+
+    pub fn compute_residuals_non_zero(
+        &self,
+        discount_factors: &Vec<f64>,
+        non_zero: &Vec<usize>,
+    ) -> Result<Vec<Option<f64>>> {
+        let data_map = {
+            let mut engine = self.engine.borrow_mut();
+            engine.update_discount_factors(discount_factors)?;
+            let relevant_instruments = engine.relevant_instruments();
+            let market_request_cache = engine.market_request_cache();
+            let model = BootstrappingModel::new(engine.market_store());
+            let data: Vec<_> = relevant_instruments
+                .iter()
+                .enumerate()
+                .map(|(id, &relevant_instrument)| {
+                    if !non_zero.contains(&id) {
+                        return Ok((relevant_instrument, None));
+                    } else {
+                        let market_request = &market_request_cache[relevant_instrument];
+                        let data_row = model.gen_market_data(market_request)?;
+                        Ok((relevant_instrument, Some(data_row)))
+                    }
+                })
+                .collect::<Result<Vec<_>>>()?;
+            data
+        };
+
+        let residuals = {
+            let mut engine = self.engine.borrow_mut();
+            let instruments = engine.instruments_mut();
+
+            data_map
+                .iter()
+                .map(|(index, data)| {
+                    if let Some(data) = data {
+                        let mut instrument = &mut instruments[*index];
+                        let fixing_visitor = FixingVisitor::new(data);
+                        let npv_visitor = NPVConstVisitor::new(data, true);
+                        fixing_visitor.visit(&mut instrument)?;
+                        let npv = npv_visitor.visit(&mut instrument)?;
+                        Ok(Some(npv))
+                    } else {
+                        Ok(None)
+                    }
+                })
+                .collect::<Result<Vec<Option<f64>>>>()?
+        };
+        Ok(residuals)
+    }
+
+    pub fn compute_jacobian(&self, discount_factors: &Vec<f64>) -> Result<Vec<Vec<f64>>> {
+        let epsilon = self.epsilon;
+        let n = discount_factors.len();
+        let r_base = self.compute_residuals(discount_factors)?;
+        let mut jacobian = Vec::new();
+        let mut non_zero = Vec::new();
+
+        match self.jacobian_non_zero_cache.borrow().as_ref() {
+            None => {
+                for i in 0..n {
+                    let mut plus = discount_factors.clone();
+                    plus[i] += epsilon;
+                    let r_plus = self.compute_residuals(&plus)?;
+                    let mut jacobian_row = Vec::new();
+                    let mut non_zero_row = Vec::new();
+                    for j in 0..n {
+                        let delta_ij = r_plus[j] - r_base[j];
+                        jacobian_row.push(delta_ij * self.inv_epsilon);
+                        if delta_ij != 0.0 {
+                            non_zero_row.push(j);
+                        }
+                    }
+                    jacobian.push(jacobian_row);
+                    non_zero.push(non_zero_row);
+                }
+            }
+            Some(non_zero) => {
+                for i in 0..n {
+                    let non_zero_row = &non_zero[i];
+                    let mut plus = discount_factors.clone();
+                    plus[i] += epsilon;
+                    let r_plus = self.compute_residuals_non_zero(&plus, non_zero_row)?;
+                    let mut jacobian_row = Vec::new();
+                    for j in 0..n {
+                        if let Some(r_j) = r_plus[j] {
+                            jacobian_row.push((r_j - r_base[j]) * self.inv_epsilon);
+                        } else {
+                            jacobian_row.push(0.0);
+                        }
+                    }
+                    jacobian.push(jacobian_row);
+                }
+            }
+        }
+
+        if non_zero.is_empty() {
+            return Ok(jacobian);
+        } else {
+            self.jacobian_non_zero_cache.replace(Some(non_zero));
+            Ok(jacobian)
+        }
     }
 }
 
@@ -187,21 +309,16 @@ impl<'a> Residual for &BootstrappingSolver<'a> {
     }
 }
 
-/// Implementing the Jacobian trait for BootstrappingSolver
 impl<'a> Jacobian for &BootstrappingSolver<'a> {
     fn jacobian(&self, x: &nalgebra::DVector<f64>) -> Result<DMatrix<f64>> {
-        let epsilon = self.epsilon;
-        let n = x.len();
-        let r_base = self.residual(x)?;
-        let mut jacobian = DMatrix::zeros(n, n);
-        for i in 0..n {
-            let mut plus = x.clone();
-            plus[i] += epsilon;
-            let r_plus = self.residual(&plus)?;
-            for j in 0..n {
-                jacobian[(j, i)] = (r_plus[j] - r_base[j]) * self.inv_epsilon;
-            }
-        }
+        let discount_factors: Vec<f64> = x.iter().map(|&v| v).collect();
+        let n = discount_factors.len();
+        let jacobian = self
+            .compute_jacobian(&discount_factors)?
+            .into_iter()
+            .flatten()
+            .collect();
+        let jacobian = DMatrix::from_vec(n, n, jacobian);
         Ok(jacobian)
     }
 }
@@ -261,7 +378,7 @@ mod tests {
             calendars::unitedstates::UnitedStates,
             date::Date,
             daycounter::DayCounter,
-            enums::{Frequency, TimeUnit},
+            enums::{BusinessDayConvention, Frequency, TimeUnit},
             period::Period,
         },
     };
@@ -292,7 +409,7 @@ mod tests {
         Ok(inst)
     }
 
-    fn make_vanillairs_swap(
+    fn make_vanillairs_swap_type1(
         ref_date: Date,
         tenor: Period,
         fixed_rate: f64,
@@ -311,6 +428,7 @@ mod tests {
         let fix_leg = MakeFixedRateLeg::new()
             .with_calendar(Some(calendar))
             .with_settlement_period(Period::new(2, TimeUnit::Days))
+            .with_payment_lag(Period::new(0, TimeUnit::Days))
             .with_negotiation_date(start_date)
             .with_tenor(tenor)
             .with_notional(notional)
@@ -327,6 +445,64 @@ mod tests {
         let float_leg = MakeFloatingRateLeg::new()
             .with_calendar(Some(calendar))
             .with_settlement_period(Period::new(2, TimeUnit::Days))
+            .with_payment_lag(Period::new(0, TimeUnit::Days))
+            .with_negotiation_date(start_date)
+            .with_tenor(tenor)
+            .with_payment_frequency(Frequency::Annual)
+            .with_spread(0.0)
+            .with_rate_definition(rate_definition)
+            .with_side(Side::Pay)
+            .with_currency(Currency::USD)
+            .with_notional(notional)
+            .with_discount_curve_id(Some(curve_id))
+            .with_forecast_curve_id(Some(curve_id))
+            .bullet()
+            .build()
+            .unwrap();
+
+        let vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg, Currency::USD)?;
+        Ok(vanillairsswap)
+    }
+
+    fn make_vanillairs_swap_type2(
+        ref_date: Date,
+        tenor: Period,
+        fixed_rate: f64,
+        curve_id: usize,
+    ) -> Result<VanillaIRSSwap> {
+        let start_date = ref_date;
+        let rate_definition = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Simple,
+            Frequency::Annual,
+        );
+        let rate = InterestRate::from_rate_definition(fixed_rate, rate_definition);
+        let notional = 1_000_000.0;
+
+        let calendar = Calendar::UnitedStates(UnitedStates::default());
+        let fix_leg = MakeFixedRateLeg::new()
+            .with_calendar(Some(calendar))
+            .with_settlement_period(Period::new(2, TimeUnit::Days))
+            .with_payment_lag(Period::new(0, TimeUnit::Days))
+            .with_business_day_convention(Some(BusinessDayConvention::ModifiedFollowing))
+            .with_negotiation_date(start_date)
+            .with_tenor(tenor)
+            .with_notional(notional)
+            .with_rate(rate)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_discount_curve_id(Some(curve_id))
+            .with_payment_frequency(Frequency::Annual)
+            .bullet()
+            .build()
+            .unwrap();
+
+        let calendar = Calendar::UnitedStates(UnitedStates::default());
+        let float_leg = MakeFloatingRateLeg::new()
+            .with_calendar(Some(calendar))
+            .with_settlement_period(Period::new(2, TimeUnit::Days))
+            .with_payment_lag(Period::new(0, TimeUnit::Days))
+            .with_business_day_convention(Some(BusinessDayConvention::ModifiedFollowing))
             .with_negotiation_date(start_date)
             .with_tenor(tenor)
             .with_payment_frequency(Frequency::Annual)
@@ -363,39 +539,39 @@ mod tests {
         engine.add_instrument(5, end_date, Box::new(inst2))?;
 
         let tenor = Period::new(1, TimeUnit::Weeks);
-        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        let swap1 = make_vanillairs_swap_type1(ref_date, tenor, 0.0432544, 5)?;
         engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
 
         let tenor = Period::new(2, TimeUnit::Weeks);
-        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        let swap2 = make_vanillairs_swap_type1(ref_date, tenor, 0.04335, 5)?;
         engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
 
         let tenor = Period::new(1, TimeUnit::Months);
-        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        let swap3 = make_vanillairs_swap_type1(ref_date, tenor, 0.0434345, 5)?;
         engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
 
         let tenor = Period::new(2, TimeUnit::Months);
-        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        let swap4 = make_vanillairs_swap_type1(ref_date, tenor, 0.043481, 5)?;
         engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
 
         let tenor = Period::new(3, TimeUnit::Months);
-        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        let swap5 = make_vanillairs_swap_type1(ref_date, tenor, 0.043192, 5)?;
         engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
 
         let tenor = Period::new(1, TimeUnit::Years);
-        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        let swap6 = make_vanillairs_swap_type1(ref_date, tenor, 0.039811, 5)?;
         engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
 
         let tenor = Period::new(2, TimeUnit::Years);
-        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        let swap7 = make_vanillairs_swap_type1(ref_date, tenor, 0.0362295, 5)?;
         engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
 
         let tenor = Period::new(3, TimeUnit::Years);
-        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 5)?;
+        let swap8 = make_vanillairs_swap_type1(ref_date, tenor, 0.03531375, 5)?;
         engine.add_instrument(5, swap8.accrual_end_date()?, Box::new(swap8))?;
 
         let tenor = Period::new(4, TimeUnit::Years);
-        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 5)?;
+        let swap9 = make_vanillairs_swap_type1(ref_date, tenor, 0.0353595, 5)?;
         engine.add_instrument(5, swap9.accrual_end_date()?, Box::new(swap9))?;
 
         let optimization_orders = vec![vec![
@@ -455,39 +631,39 @@ mod tests {
         engine.add_instrument(5, end_date, Box::new(inst2))?;
 
         let tenor = Period::new(1, TimeUnit::Weeks);
-        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        let swap1 = make_vanillairs_swap_type1(ref_date, tenor, 0.0432544, 5)?;
         engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
 
         let tenor = Period::new(2, TimeUnit::Weeks);
-        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        let swap2 = make_vanillairs_swap_type1(ref_date, tenor, 0.04335, 5)?;
         engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
 
         let tenor = Period::new(1, TimeUnit::Months);
-        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        let swap3 = make_vanillairs_swap_type1(ref_date, tenor, 0.0434345, 5)?;
         engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
 
         let tenor = Period::new(2, TimeUnit::Months);
-        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        let swap4 = make_vanillairs_swap_type1(ref_date, tenor, 0.043481, 5)?;
         engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
 
         let tenor = Period::new(3, TimeUnit::Months);
-        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        let swap5 = make_vanillairs_swap_type1(ref_date, tenor, 0.043192, 5)?;
         engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
 
         let tenor = Period::new(1, TimeUnit::Years);
-        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        let swap6 = make_vanillairs_swap_type1(ref_date, tenor, 0.039811, 5)?;
         engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
 
         let tenor = Period::new(2, TimeUnit::Years);
-        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        let swap7 = make_vanillairs_swap_type1(ref_date, tenor, 0.0362295, 5)?;
         engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
 
         let tenor = Period::new(3, TimeUnit::Years);
-        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 5)?;
+        let swap8 = make_vanillairs_swap_type1(ref_date, tenor, 0.03531375, 5)?;
         engine.add_instrument(5, swap8.accrual_end_date()?, Box::new(swap8))?;
 
         let tenor = Period::new(4, TimeUnit::Years);
-        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 5)?;
+        let swap9 = make_vanillairs_swap_type1(ref_date, tenor, 0.0353595, 5)?;
         engine.add_instrument(5, swap9.accrual_end_date()?, Box::new(swap9))?;
 
         let optimization_orders = vec![
@@ -591,39 +767,39 @@ mod tests {
         engine.add_instrument(5, end_date, Box::new(inst2))?;
 
         let tenor = Period::new(1, TimeUnit::Weeks);
-        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        let swap1 = make_vanillairs_swap_type1(ref_date, tenor, 0.0432544, 5)?;
         engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
 
         let tenor = Period::new(2, TimeUnit::Weeks);
-        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        let swap2 = make_vanillairs_swap_type1(ref_date, tenor, 0.04335, 5)?;
         engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
 
         let tenor = Period::new(1, TimeUnit::Months);
-        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        let swap3 = make_vanillairs_swap_type1(ref_date, tenor, 0.0434345, 5)?;
         engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
 
         let tenor = Period::new(2, TimeUnit::Months);
-        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        let swap4 = make_vanillairs_swap_type1(ref_date, tenor, 0.043481, 5)?;
         engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
 
         let tenor = Period::new(3, TimeUnit::Months);
-        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        let swap5 = make_vanillairs_swap_type1(ref_date, tenor, 0.043192, 5)?;
         engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
 
         let tenor = Period::new(1, TimeUnit::Years);
-        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        let swap6 = make_vanillairs_swap_type1(ref_date, tenor, 0.039811, 5)?;
         engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
 
         let tenor = Period::new(2, TimeUnit::Years);
-        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        let swap7 = make_vanillairs_swap_type1(ref_date, tenor, 0.0362295, 5)?;
         engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
 
         let tenor = Period::new(3, TimeUnit::Years);
-        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 5)?;
+        let swap8 = make_vanillairs_swap_type1(ref_date, tenor, 0.03531375, 5)?;
         engine.add_instrument(5, swap8.accrual_end_date()?, Box::new(swap8))?;
 
         let tenor = Period::new(4, TimeUnit::Years);
-        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 5)?;
+        let swap9 = make_vanillairs_swap_type1(ref_date, tenor, 0.0353595, 5)?;
         engine.add_instrument(5, swap9.accrual_end_date()?, Box::new(swap9))?;
 
         let optimization_orders = vec![vec![5]];
@@ -671,39 +847,39 @@ mod tests {
         engine.add_instrument(5, end_date, Box::new(inst2))?;
 
         let tenor = Period::new(1, TimeUnit::Weeks);
-        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        let swap1 = make_vanillairs_swap_type1(ref_date, tenor, 0.0432544, 5)?;
         engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
 
         let tenor = Period::new(2, TimeUnit::Weeks);
-        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        let swap2 = make_vanillairs_swap_type1(ref_date, tenor, 0.04335, 5)?;
         engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
 
         let tenor = Period::new(1, TimeUnit::Months);
-        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        let swap3 = make_vanillairs_swap_type1(ref_date, tenor, 0.0434345, 5)?;
         engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
 
         let tenor = Period::new(2, TimeUnit::Months);
-        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        let swap4 = make_vanillairs_swap_type1(ref_date, tenor, 0.043481, 5)?;
         engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
 
         let tenor = Period::new(3, TimeUnit::Months);
-        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        let swap5 = make_vanillairs_swap_type1(ref_date, tenor, 0.043192, 5)?;
         engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
 
         let tenor = Period::new(1, TimeUnit::Years);
-        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        let swap6 = make_vanillairs_swap_type1(ref_date, tenor, 0.039811, 5)?;
         engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
 
         let tenor = Period::new(2, TimeUnit::Years);
-        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        let swap7 = make_vanillairs_swap_type1(ref_date, tenor, 0.0362295, 5)?;
         engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
 
         let tenor = Period::new(3, TimeUnit::Years);
-        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 6)?;
+        let swap8 = make_vanillairs_swap_type1(ref_date, tenor, 0.03531375, 6)?;
         engine.add_instrument(6, swap8.accrual_end_date()?, Box::new(swap8))?;
 
         let tenor = Period::new(4, TimeUnit::Years);
-        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 6)?;
+        let swap9 = make_vanillairs_swap_type1(ref_date, tenor, 0.0353595, 6)?;
         engine.add_instrument(6, swap9.accrual_end_date()?, Box::new(swap9))?;
 
         let optimization_orders = vec![vec![5, 6]];
@@ -751,39 +927,39 @@ mod tests {
         engine.add_instrument(5, end_date, Box::new(inst2))?;
 
         let tenor = Period::new(1, TimeUnit::Weeks);
-        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        let swap1 = make_vanillairs_swap_type1(ref_date, tenor, 0.0432544, 5)?;
         engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
 
         let tenor = Period::new(2, TimeUnit::Weeks);
-        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        let swap2 = make_vanillairs_swap_type1(ref_date, tenor, 0.04335, 5)?;
         engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
 
         let tenor = Period::new(1, TimeUnit::Months);
-        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        let swap3 = make_vanillairs_swap_type1(ref_date, tenor, 0.0434345, 5)?;
         engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
 
         let tenor = Period::new(2, TimeUnit::Months);
-        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        let swap4 = make_vanillairs_swap_type1(ref_date, tenor, 0.043481, 5)?;
         engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
 
         let tenor = Period::new(3, TimeUnit::Months);
-        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        let swap5 = make_vanillairs_swap_type1(ref_date, tenor, 0.043192, 5)?;
         engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
 
         let tenor = Period::new(1, TimeUnit::Years);
-        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        let swap6 = make_vanillairs_swap_type1(ref_date, tenor, 0.039811, 5)?;
         engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
 
         let tenor = Period::new(2, TimeUnit::Years);
-        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        let swap7 = make_vanillairs_swap_type1(ref_date, tenor, 0.0362295, 5)?;
         engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
 
         let tenor = Period::new(3, TimeUnit::Years);
-        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 6)?;
+        let swap8 = make_vanillairs_swap_type1(ref_date, tenor, 0.03531375, 6)?;
         engine.add_instrument(6, swap8.accrual_end_date()?, Box::new(swap8))?;
 
         let tenor = Period::new(4, TimeUnit::Years);
-        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 6)?;
+        let swap9 = make_vanillairs_swap_type1(ref_date, tenor, 0.0353595, 6)?;
         engine.add_instrument(6, swap9.accrual_end_date()?, Box::new(swap9))?;
 
         let optimization_orders = vec![vec![5], vec![6]];
@@ -833,39 +1009,39 @@ mod tests {
         engine.add_instrument(5, end_date, Box::new(inst2))?;
 
         let tenor = Period::new(1, TimeUnit::Weeks);
-        let swap1 = make_vanillairs_swap(ref_date, tenor, 0.0432544, 5)?;
+        let swap1 = make_vanillairs_swap_type1(ref_date, tenor, 0.0432544, 5)?;
         engine.add_instrument(5, swap1.accrual_end_date()?, Box::new(swap1))?;
 
         let tenor = Period::new(2, TimeUnit::Weeks);
-        let swap2 = make_vanillairs_swap(ref_date, tenor, 0.04335, 5)?;
+        let swap2 = make_vanillairs_swap_type1(ref_date, tenor, 0.04335, 5)?;
         engine.add_instrument(5, swap2.accrual_end_date()?, Box::new(swap2))?;
 
         let tenor = Period::new(1, TimeUnit::Months);
-        let swap3 = make_vanillairs_swap(ref_date, tenor, 0.0434345, 5)?;
+        let swap3 = make_vanillairs_swap_type1(ref_date, tenor, 0.0434345, 5)?;
         engine.add_instrument(5, swap3.accrual_end_date()?, Box::new(swap3))?;
 
         let tenor = Period::new(2, TimeUnit::Months);
-        let swap4 = make_vanillairs_swap(ref_date, tenor, 0.043481, 5)?;
+        let swap4 = make_vanillairs_swap_type1(ref_date, tenor, 0.043481, 5)?;
         engine.add_instrument(5, swap4.accrual_end_date()?, Box::new(swap4))?;
 
         let tenor = Period::new(3, TimeUnit::Months);
-        let swap5 = make_vanillairs_swap(ref_date, tenor, 0.043192, 5)?;
+        let swap5 = make_vanillairs_swap_type1(ref_date, tenor, 0.043192, 5)?;
         engine.add_instrument(5, swap5.accrual_end_date()?, Box::new(swap5))?;
 
         let tenor = Period::new(1, TimeUnit::Years);
-        let swap6 = make_vanillairs_swap(ref_date, tenor, 0.039811, 5)?;
+        let swap6 = make_vanillairs_swap_type1(ref_date, tenor, 0.039811, 5)?;
         engine.add_instrument(5, swap6.accrual_end_date()?, Box::new(swap6))?;
 
         let tenor = Period::new(2, TimeUnit::Years);
-        let swap7 = make_vanillairs_swap(ref_date, tenor, 0.0362295, 5)?;
+        let swap7 = make_vanillairs_swap_type1(ref_date, tenor, 0.0362295, 5)?;
         engine.add_instrument(5, swap7.accrual_end_date()?, Box::new(swap7))?;
 
         let tenor = Period::new(3, TimeUnit::Years);
-        let swap8 = make_vanillairs_swap(ref_date, tenor, 0.03531375, 5)?;
+        let swap8 = make_vanillairs_swap_type1(ref_date, tenor, 0.03531375, 5)?;
         engine.add_instrument(5, swap8.accrual_end_date()?, Box::new(swap8))?;
 
         let tenor = Period::new(4, TimeUnit::Years);
-        let swap9 = make_vanillairs_swap(ref_date, tenor, 0.0353595, 5)?;
+        let swap9 = make_vanillairs_swap_type1(ref_date, tenor, 0.0353595, 5)?;
         engine.add_instrument(5, swap9.accrual_end_date()?, Box::new(swap9))?;
 
         let optimization_orders = vec![vec![5]];
@@ -887,6 +1063,104 @@ mod tests {
         print!("MarketStore state: {}", marketstore);
 
         assert!(marketstore.get_index(5).is_ok());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_bootstrapping_engine_run_optimization_special_case() -> Result<()> {
+        // real case for the bootstrapping engine at 11/08/2025
+        let start_time = Instant::now();
+        let ref_date = Date::new(2025, 8, 11);
+        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
+        let bootstrappingmarketstore = engine.market_store_mut();
+        bootstrappingmarketstore.add_curve(5, Currency::USD)?;
+
+        // ON rate
+        let end_date = ref_date + Period::new(1, TimeUnit::Days);
+        let inst1 = make_fixed_instruments(ref_date, end_date, 0.0435, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst1))?;
+
+        // TN rate
+        let end_date = ref_date + Period::new(2, TimeUnit::Days);
+        let inst2 =
+            make_fixed_instruments(ref_date, end_date, 0.043502628124962900, Structure::Zero, 5)?;
+        engine.add_instrument(5, end_date, Box::new(inst2))?;
+
+        // swaps zero rates
+        let swaps_rates = vec![
+            ("1W".to_string(), 4.3507),
+            ("2W".to_string(), 4.34924),
+            ("1M".to_string(), 4.3638),
+            ("2M".to_string(), 4.29165),
+            ("3M".to_string(), 4.23707),
+            ("4M".to_string(), 4.1836),
+            ("5M".to_string(), 4.12685),
+            ("6M".to_string(), 4.07435),
+            ("7M".to_string(), 4.0334),
+            ("8M".to_string(), 3.98825),
+            ("9M".to_string(), 3.94915),
+            ("10M".to_string(), 3.91115),
+            ("11M".to_string(), 3.87595),
+            ("12M".to_string(), 3.83895),
+        ];
+
+        for (tenor, rate) in swaps_rates {
+            let tenor = Period::from_str(&tenor)?;
+            let swap = make_vanillairs_swap_type1(ref_date, tenor, rate * 0.01, 5)?;
+            engine.add_instrument(5, swap.last_payment_date(), Box::new(swap))?;
+        }
+
+        // swaps bullet rates
+        let swaps_rates = vec![
+            ("2Y".to_string(), 3.5109),
+            ("3Y".to_string(), 3.42375),
+            ("4Y".to_string(), 3.4203),
+            ("5Y".to_string(), 3.4515),
+            ("6Y".to_string(), 3.5031),
+            ("7Y".to_string(), 3.561125),
+            ("8Y".to_string(), 3.62075),
+            ("9Y".to_string(), 3.67823),
+            ("10Y".to_string(), 3.733925),
+            ("12Y".to_string(), 3.8363),
+            ("15Y".to_string(), 3.9521),
+            ("20Y".to_string(), 4.0438),
+            ("25Y".to_string(), 4.04545),
+            ("30Y".to_string(), 4.007005),
+        ];
+
+        for (tenor, rate) in swaps_rates {
+            let tenor = Period::from_str(&tenor)?;
+            let swap = make_vanillairs_swap_type2(ref_date, tenor, rate * 0.01, 5)?;
+            engine.add_instrument(5, swap.last_payment_date(), Box::new(swap))?;
+        }
+
+        let optimization_orders = vec![vec![5]];
+
+        let engine_cell = RefCell::new(engine);
+        let bootstrapping_optimization = BootstrappingSolver::new(&engine_cell)?
+            .with_optimization_order_by_curve_id(optimization_orders);
+        bootstrapping_optimization.run()?;
+
+        println!("Bootstrapping optimization completed successfully.");
+        println!("Engine state: {}", engine_cell.borrow());
+
+        let duration = start_time.elapsed();
+        println!("Optimization took {:?}", duration);
+
+        let binding = engine_cell.borrow();
+        let curve = binding
+            .market_store()
+            .curves_map()
+            .get(&5)
+            .unwrap()
+            .discount_factors();
+
+        assert!((*curve.get(0).unwrap() - 1.0).abs() < 1e-8);
+        assert!((*curve.get(1).unwrap() - 0.9998791812655972).abs() < 1e-8);
+        assert!((*curve.get(10).unwrap() - 0.979363662074759).abs() < 1e-8);
+        assert!((*curve.get(15).unwrap() - 0.9650548104528078).abs() < 1e-8);
+        assert!((*curve.get(30).unwrap() - 0.2994635491003804).abs() < 1e-8);
 
         Ok(())
     }
