@@ -1,6 +1,6 @@
 use crate::{
     cashflows::{cashflow::Cashflow, simplecashflow::SimpleCashflow, traits::Payable},
-    core::traits::{HasCurrency, HasDiscountCurveId},
+    core::traits::HasDiscountCurveId,
     currencies::enums::Currency,
     time::date::Date,
     utils::errors::Result,
@@ -26,12 +26,12 @@ impl FxForward {
         pay_cashflow: SimpleCashflow,
         receive_cashflow: SimpleCashflow,
     ) -> Result<FxForward> {
+        let pay_discount_curve_id = pay_cashflow.discount_curve_id().ok().clone();
+        let pay_currency = pay_cashflow.payment_currency()?;
         let pay_cashflows = vec![Cashflow::Disbursement(pay_cashflow)];
-        let pay_discount_curve_id = pay_cashflow.discount_curve_id().ok();
-        let pay_currency = pay_cashflow.currency()?;
-        let receive_cashflows = vec![Cashflow::Redemption(receive_cashflow)];
         let receive_discount_curve_id = receive_cashflow.discount_curve_id().ok();
-        let receive_currency = receive_cashflow.currency()?;
+        let receive_currency = receive_cashflow.payment_currency()?;
+        let receive_cashflows = vec![Cashflow::Redemption(receive_cashflow)];
         Ok(FxForward {
             id: None,
             pay_currency,
@@ -198,7 +198,12 @@ impl std::fmt::Display for FxForward {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{cashflows::side::Side, time::date::Date, utils::errors::Result};
+    use crate::{
+        cashflows::side::Side,
+        currencies::exchangerategeneration::{ExchangeGenerationMethod, Triangulation},
+        time::date::Date,
+        utils::errors::Result,
+    };
 
     #[test]
     fn test_fxforward_creation() -> Result<()> {
@@ -209,6 +214,28 @@ mod tests {
             SimpleCashflow::new(pay_date, pay_currency, Side::Pay).with_amount(100.0);
         let receive_cashflow =
             SimpleCashflow::new(pay_date, receive_currency, Side::Receive).with_amount(100.0);
+        let fx_forward = FxForward::new(pay_cashflow, receive_cashflow)?;
+        assert_eq!(fx_forward.pay_currency(), pay_currency);
+        assert_eq!(fx_forward.receive_currency(), receive_currency);
+        Ok(())
+    }
+
+    #[test]
+    fn test_fxforward_creation_with_generation_method_triangulation() -> Result<()> {
+        let pay_date = Date::new(2021, 1, 1);
+        let currency = Currency::EUR;
+        let pay_currency = Currency::CLP;
+        let pay_cashflow = SimpleCashflow::new(pay_date, currency, Side::Pay)
+            .with_amount(100.0)
+            .with_payment_currency(pay_currency)
+            .with_exchange_fixing_method(ExchangeGenerationMethod::Triangulation(
+                Triangulation::new(Currency::USD, pay_date - 1 , pay_date + 1),
+            ));
+
+        let receive_currency = Currency::CLP;
+        let receive_cashflow =
+            SimpleCashflow::new(pay_date, receive_currency, Side::Receive).with_amount(100.0);
+        
         let fx_forward = FxForward::new(pay_cashflow, receive_cashflow)?;
         assert_eq!(fx_forward.pay_currency(), pay_currency);
         assert_eq!(fx_forward.receive_currency(), receive_currency);

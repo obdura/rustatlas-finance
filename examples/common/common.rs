@@ -1,20 +1,25 @@
 extern crate rustatlas;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use rustatlas::{
-    cashflows::{
-        cashflow::Cashflow,
-        traits::Payable,
-        side::Side
-    }, core::{marketstore::MarketStore, meta::MarketData}, currencies::enums::Currency, instruments::{constructors::makefixedrateinstrument::MakeFixedRateInstrument, loandepos::instrument::Instrument}, rates::{
+    cashflows::side::Side,
+    core::marketstore::MarketStore,
+    currencies::enums::Currency,
+    instruments::{
+        constructors::makefixedrateinstrument::MakeFixedRateInstrument,
+        loandepos::instrument::Instrument,
+    },
+    rates::{
         interestrate::RateDefinition,
         interestrateindex::{iborindex::IborIndex, overnightindex::OvernightIndex},
         traits::HasReferenceDate,
         yieldtermstructure::flatforwardtermstructure::FlatForwardTermStructure,
-    }, time::{
+    },
+    time::{
         date::Date,
         enums::{Frequency, TimeUnit},
         period::Period,
-    }, utils::errors::Result
+    },
+    utils::errors::Result,
 };
 use std::{
     collections::HashMap,
@@ -31,35 +36,6 @@ pub fn print_title(title: &str) {
     print_separator();
     println!("{}", title);
     print_separator();
-}
-
-#[allow(dead_code)]
-pub fn print_table(cashflows: Vec<&Cashflow>, market_data: &[MarketData]) {
-    println!(
-        "{:10} | {:10} | {:10} | {:10}| {:10}",
-        "Date", "Amount", "DF", "FWD", "FX"
-    );
-    for (cf, md) in cashflows.iter().zip(market_data) {
-        let date = format!("{:10}", cf.payment_date().to_string());
-        let amount = format!("{:10.2}", cf.amount().unwrap()); // Assuming `cf.amount()` is a float
-
-        let df = match md.df() {
-            Ok(df) => format!("{:10.2}", df),
-            _ => "None      ".to_string(), // 10 characters wide
-        };
-
-        let fx = match md.fx() {
-            Ok(fx) => format!("{:10.2}", fx),
-            _ => "None      ".to_string(), // 10 characters wide
-        };
-
-        let fwd = match md.fwd() {
-            Ok(fwd) => format!("{:9.3}", fwd),
-            _ => "None      ".to_string(), // 10 characters wide
-        };
-
-        println!("{} | {} | {} | {} | {}", date, amount, df, fwd, fx);
-    }
 }
 
 #[allow(dead_code)]

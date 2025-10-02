@@ -105,6 +105,11 @@ impl<T: HasCashflows> ConstVisit<T> for CashflowsAggregatorConstVisitor {
                         .and_modify(|e| *e += amount)
                         .or_insert(amount);
                 }
+                Cashflow::IndexFxCashflow(_cashflow) => {
+                    Err(AtlasError::InvalidValueErr(
+                        "IndexFxCashflow cashflow are not supported in cashflows aggregator visitor".to_string(),
+                    ))?
+                }
             }
             Ok(())
         })

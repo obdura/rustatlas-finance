@@ -2,7 +2,8 @@ use crate::{
     cashflows::{
         cashflow::{Cashflow, CashflowType},
         traits::Payable,
-    }, time::date::Date
+    },
+    time::date::Date,
 };
 
 /// Trait for objects that can be visited by a visitor that can mutate the object.
@@ -18,9 +19,9 @@ pub trait ConstVisit<T> {
 }
 
 /// Trait for objects that have cashflows.
-/// 
+///
 /// # methods
-/// 
+///
 /// - `cashflows` returns an iterator over the cashflows.
 /// - `mut_cashflows` returns an iterator over the cashflows that can be mutated.
 /// - `cashflows_as_vec` returns a vector of references to the cashflows.
@@ -33,9 +34,7 @@ pub trait ConstVisit<T> {
 ///
 ///
 pub trait HasCashflows {
-
-
-    fn cashflows(&self) -> Box<dyn Iterator<Item = &Cashflow> + '_>; 
+    fn cashflows(&self) -> Box<dyn Iterator<Item = &Cashflow> + '_>;
     fn mut_cashflows(&mut self) -> Box<dyn Iterator<Item = &mut Cashflow> + '_>;
 
     fn cashflows_as_vec(&self) -> Vec<&Cashflow> {
@@ -50,7 +49,7 @@ pub trait HasCashflows {
         self.mut_cashflows()
             .for_each(|cf| cf.set_discount_curve_id(id));
     }
-    
+
     fn set_forecast_curve_id(&mut self, id: usize) {
         self.mut_cashflows().for_each(|cf| match cf {
             Cashflow::FloatingRateCoupon(frcf) => frcf.set_forecast_curve_id(id),
@@ -84,6 +83,12 @@ pub trait HasCashflows {
                 .filter(|cf| cf.payment_date() > reference_date)
                 .min_by(|cf1, cf2| cf1.payment_date().cmp(&cf2.payment_date()))
                 .cloned(),
+            CashflowType::IndexFxCashflow => self
+                .cashflows()
+                .filter(|cf| matches!(cf, Cashflow::IndexFxCashflow(_)))
+                .filter(|cf| cf.payment_date() > reference_date)
+                .min_by(|cf1, cf2| cf1.payment_date().cmp(&cf2.payment_date()))
+                .cloned(),
         }
     }
 
@@ -107,6 +112,11 @@ pub trait HasCashflows {
             CashflowType::FloatingRateCoupon => self
                 .cashflows()
                 .filter(|cf| matches!(cf, Cashflow::FloatingRateCoupon(_)))
+                .min_by(|cf1, cf2| cf1.payment_date().cmp(&cf2.payment_date()))
+                .cloned(),
+            CashflowType::IndexFxCashflow => self
+                .cashflows()
+                .filter(|cf| matches!(cf, Cashflow::IndexFxCashflow(_)))
                 .min_by(|cf1, cf2| cf1.payment_date().cmp(&cf2.payment_date()))
                 .cloned(),
         }
@@ -134,10 +144,14 @@ pub trait HasCashflows {
                 .filter(|cf| matches!(cf, Cashflow::FloatingRateCoupon(_)))
                 .max_by(|cf1, cf2| cf1.payment_date().cmp(&cf2.payment_date()))
                 .cloned(),
+            CashflowType::IndexFxCashflow => self
+                .cashflows()
+                .filter(|cf| matches!(cf, Cashflow::IndexFxCashflow(_)))
+                .max_by(|cf1, cf2| cf1.payment_date().cmp(&cf2.payment_date()))
+                .cloned(),
         }
     }
 }
-
 
 // Base implementation for HasCashflows for &vec<Cashflow> and &[Cashflow]
 // Implement HasCashflows for &Vec<Cashflow>

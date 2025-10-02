@@ -1,4 +1,4 @@
-use crate::{core::meta::MarketData, visitors::{indexingvisitors::fixingvisitor::FixingVisitor, npvvisitors::npvconstvisitor::NPVConstVisitor}};
+use crate::{models::traits::Model, visitors::{fixingvisitor::fixingvisitor::FixingVisitor, npvvisitors::npvconstvisitor::NPVConstVisitor}};
 
 
 /// # ParValue
@@ -15,9 +15,9 @@ pub struct ParValue<'a, T> {
 }
 
 impl<'a, T> ParValue<'a, T> {
-    pub fn new(eval: &'a T, market_data: &'a [MarketData]) -> Self {
-        let npv_visitor = NPVConstVisitor::new(market_data, true);
-        let fixing_visitor = FixingVisitor::new(market_data);
+    pub fn new(eval: &'a T, model: &'a dyn Model) -> Self {
+        let npv_visitor = NPVConstVisitor::new(model, true);
+        let fixing_visitor = FixingVisitor::new(model);
         ParValue {
             eval,
             npv_visitor: Box::new(npv_visitor),
@@ -27,10 +27,10 @@ impl<'a, T> ParValue<'a, T> {
     }
 
     // create a new ParValue with NVPConstVisitor in local currency
-    pub fn new_with_local_currency_npv(eval: &'a T, market_data: &'a [MarketData]) -> Self {
-        let mut npv_visitor = NPVConstVisitor::new(market_data, true);
+    pub fn new_with_local_currency_npv(eval: &'a T, model: &'a dyn Model) -> Self {
+        let mut npv_visitor = NPVConstVisitor::new(model, true);
         npv_visitor.set_in_local_currency(true);
-        let fixing_visitor = FixingVisitor::new(market_data);
+        let fixing_visitor = FixingVisitor::new(model);
         ParValue {
             eval,
             npv_visitor: Box::new(npv_visitor),
@@ -58,21 +58,21 @@ impl<'a, T> ParValue<'a, T> {
 /// * for swaps instruments, the target cost is the npv of the first leg and the par rate is calculated for the second leg
 ///    
 pub struct ParValueConstVisitor<'a> {
-    pub market_data: &'a [MarketData],
+    pub model: &'a dyn Model,
     pub target_cost: Option<f64>,
 }
 
 impl<'a> ParValueConstVisitor<'a> {
-    pub fn new(market_data: &'a [MarketData]) -> Self {
+    pub fn new(model: &'a dyn Model) -> Self {
         ParValueConstVisitor { 
-            market_data: market_data,
+            model: model,
             target_cost: None,
         }
     }
 
-    pub fn new_with_target_cost(market_data: &'a [MarketData], target_cost: f64) -> Self {
+    pub fn new_with_target_cost(model: &'a dyn Model, target_cost: f64) -> Self {
         ParValueConstVisitor { 
-            market_data: market_data,
+            model: model,
             target_cost: Some(target_cost),
         }
     }

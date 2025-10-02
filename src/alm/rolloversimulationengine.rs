@@ -8,7 +8,7 @@ use crate::{
     currencies::enums::Currency,
     instruments::loandepos::instrument::Instrument,
     math::interpolation::{linear::LinearInterpolator, traits::Interpolate},
-    models::{simplemodel::SimpleModel, traits::Model},
+    models::simplemodel::SimpleModel,
     rates::traits::HasReferenceDate,
     time::{
         calendar::Calendar,
@@ -21,9 +21,7 @@ use crate::{
     },
     utils::errors::Result,
     visitors::{
-        compressorvisitors::cashflowaggregationvisitor::CashflowsAggregatorConstVisitor,
-        indexingvisitors::{fixingvisitor::FixingVisitor, indexingvisitor::IndexingVisitor},
-        traits::{ConstVisit, Visit},
+        compressorvisitors::cashflowaggregationvisitor::CashflowsAggregatorConstVisitor, fixingvisitor::fixingvisitor::FixingVisitor, traits::{ConstVisit, Visit}
     },
 };
 
@@ -90,19 +88,26 @@ impl<'a> RolloverSimulationEngine<'a> {
         }
     }
 
-    pub fn with_growth_mode(&mut self, mode: GrowthMode) -> &mut Self {
+    pub fn with_growth_mode(mut self, mode: GrowthMode) -> Self {
         self.growth_mode = mode;
         self
     }
 
-    pub fn with_growth_rate(&mut self, rate: f64) -> &mut Self {
+    pub fn set_growth_mode(&mut self, mode: GrowthMode) {
+        self.growth_mode = mode;
+    }
+
+    pub fn with_growth_rate(mut self, rate: f64) -> Self {
         self.growth_rate = rate;
         self
     }
 
-    pub fn with_growth_vec(&mut self, vec: Vec<(Period, f64)>) -> Result<&mut Self> {
-        let first_date = self.eval_dates.first().unwrap();
+    pub fn set_growth_rate(&mut self, rate: f64) {
+        self.growth_rate = rate;
+    }
 
+    fn growth_vec_constructor(&self, vec: Vec<(Period, f64)>) -> Result<Vec<(Date, f64)>> {
+        let first_date = self.eval_dates.first().unwrap();
         let mut yf_values: Vec<(f64, f64)> = vec
             .iter()
             .map(|(p, v)| (Actual360::year_fraction(*first_date, *first_date + *p), *v))
@@ -129,13 +134,27 @@ impl<'a> RolloverSimulationEngine<'a> {
             })
             .collect::<Result<Vec<(Date, f64)>>>()?;
 
+        Ok(growth_vec)
+    }
+
+    pub fn with_growth_vec(mut self, vec: Vec<(Period, f64)>) -> Result<Self> {
+        let growth_vec = self.growth_vec_constructor(vec)?;
         self.growth_vec = Some(growth_vec);
         Ok(self)
     }
 
-    pub fn with_scale_factor(&mut self, scale_factor: f64) -> &mut Self {
+    pub fn set_growth_vec(&mut self, vec: Vec<(Period, f64)>) -> Result<()> {
+        self.growth_vec = Some(self.growth_vec_constructor(vec)?);
+        Ok(())
+    }
+
+    pub fn with_scale_factor(mut self, scale_factor: f64) -> Self {
         self.scale_factor = Some(scale_factor);
         self
+    }
+
+    pub fn set_scale_factor(&mut self, scale_factor: f64) {
+        self.scale_factor = Some(scale_factor);
     }
 
     pub fn growth_vec(&self) -> Option<&Vec<(Date, f64)>> {
@@ -145,18 +164,20 @@ impl<'a> RolloverSimulationEngine<'a> {
     pub fn run(&self, strategies: Vec<RolloverStrategy>) -> Result<Vec<Instrument>> {
         let mut redemptions = self.base_redemptions.clone(); // redemptions for target portfolio
 
-        // scale redemptions if a scale factor is provided 
+        // scale redemptions if a scale factor is provided
         if let Some(scale_factor) = self.scale_factor {
+            println!("Scale Factor: {}", scale_factor);
             for (_, value) in redemptions.iter_mut() {
                 *value *= scale_factor;
             }
         }
 
-        let outstanding_init: f64 = self
-            .base_redemptions
+        let outstanding_init: f64 = redemptions
             .clone()
             .iter()
             .fold(0.0, |acc, (_, value)| acc + value); // total outstanding amount
+        println!("Outstanding Init: {}", outstanding_init);
+
         let mut outstanding = outstanding_init;
         let first_date = self.eval_dates.first().unwrap();
 
@@ -172,6 +193,7 @@ impl<'a> RolloverSimulationEngine<'a> {
                 Some(amount) => *amount,
                 None => 0.0,
             };
+
             let amount = match self.growth_mode {
                 GrowthMode::Annual => {
                     let delta_date = Actual360::year_fraction(*first_date, *date);
@@ -192,7 +214,7 @@ impl<'a> RolloverSimulationEngine<'a> {
                 }
                 GrowthMode::CustomGrowth => {
                     let growth_vec = self.growth_vec();
-                    outstanding -= redemption;
+                    outstanding -= redemption.clone();
                     let growth_rate = match growth_vec {
                         Some(vec) => {
                             let value = vec.iter().find(|(d, _)| d == date).unwrap().1;
@@ -206,9 +228,10 @@ impl<'a> RolloverSimulationEngine<'a> {
                     } else {
                         0.0
                     };
-                    outstanding += placement;
+                    outstanding += placement.clone();
                     placement
                 }
+
             };
 
             if amount != 0.0 {
@@ -229,19 +252,11 @@ impl<'a> RolloverSimulationEngine<'a> {
                 // generate positions
                 let mut positions = new_generator.generate();
 
-                // indexing
-                let indexing_visitor = IndexingVisitor::new();
-                positions.iter_mut().try_for_each(|inst| -> Result<()> {
-                    indexing_visitor.visit(inst)?;
-                    Ok(())
-                })?;
 
                 // market data for new positions
                 let model = SimpleModel::new(&tmp_store);
-                let data = model.gen_market_data(&indexing_visitor.request())?;
-
                 // fixing for new positions
-                let fixing_visitor = FixingVisitor::new(&data);
+                let fixing_visitor = FixingVisitor::new(&model);
                 positions.iter_mut().try_for_each(|inst| -> Result<()> {
                     fixing_visitor.visit(inst)?;
                     Ok(())
@@ -263,7 +278,7 @@ impl<'a> RolloverSimulationEngine<'a> {
                 //println!("New redemptions: {:?}", new_redemptions);
                 for (key, value) in new_redemptions {
                     let entry = redemptions.entry(key).or_insert(0.0);
-                    *entry += value;
+                    *entry += value.abs();
                 }
             }
 
@@ -411,7 +426,7 @@ mod tests {
     #[test]
     fn test_rollover_simulation_engine() -> Result<()> {
         let market_store = create_store().unwrap();
-        let horizon = Period::new(5, TimeUnit::Years);
+        let horizon = Period::new(10, TimeUnit::Years);
 
         let base_redemptions = [
             (Date::new(2021, 9, 1), 100.0),
@@ -466,6 +481,166 @@ mod tests {
         let eval_date = Date::new(2024, 9, 2);
         let outstanding = get_outstandings_at_date(&inst, eval_date)?;
         assert_eq!(outstanding, -1800.0);
+
+        let eval_date = Date::new(2025, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, -1800.0);
+
+        let eval_date = Date::new(2026, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, -1800.0);
+
+        let eval_date = Date::new(2027, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, -1800.0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_rollover_simulation_engine_inverse() -> Result<()> {
+        let market_store = create_store().unwrap();
+        let horizon = Period::new(10, TimeUnit::Years);
+
+        let base_redemptions = [
+            (Date::new(2021, 9, 1), 100.0),
+            (Date::new(2021, 10, 1), 100.0),
+            (Date::new(2021, 11, 1), 100.0),
+            (Date::new(2021, 12, 1), 100.0),
+            (Date::new(2022, 1, 1), 150.0),
+            (Date::new(2022, 2, 1), 150.0),
+            (Date::new(2022, 3, 1), 150.0),
+            (Date::new(2022, 4, 1), 150.0),
+            (Date::new(2022, 5, 1), 200.0),
+            (Date::new(2022, 6, 1), 200.0),
+            (Date::new(2022, 7, 1), 200.0),
+            (Date::new(2022, 8, 1), 200.0),
+        ]
+        .iter()
+        .map(|&(date, value)| (date, value))
+        .collect::<BTreeMap<_, _>>();
+
+        let engine =
+            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon);
+
+        let strategies = vec![
+            RolloverStrategy::new(
+                0.5,
+                Structure::Bullet,
+                Frequency::Semiannual,
+                Period::new(1, TimeUnit::Years),
+                Side::Pay,
+                RateType::Fixed,
+                RateDefinition::default(),
+                0,
+                None,
+            ),
+            RolloverStrategy::new(
+                0.5,
+                Structure::Bullet,
+                Frequency::Semiannual,
+                Period::new(2, TimeUnit::Years),
+                Side::Pay,
+                RateType::Fixed,
+                RateDefinition::default(),
+                0,
+                None,
+            ),
+        ];
+        let inst = engine.run(strategies)?;
+        let eval_date = Date::new(2023, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
+
+        let eval_date = Date::new(2024, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
+
+        let eval_date = Date::new(2025, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
+
+        let eval_date = Date::new(2026, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
+
+        let eval_date = Date::new(2027, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
+        Ok(())
+    }
+    
+    #[test]
+    fn test_rollover_simulation_engine_inverse_and_growth_mode() -> Result<()> {
+        let market_store = create_store().unwrap();
+        let horizon = Period::new(10, TimeUnit::Years);
+
+        let base_redemptions = [
+            (Date::new(2021, 9, 1), 100.0),
+            (Date::new(2021, 10, 1), 100.0),
+            (Date::new(2021, 11, 1), 100.0),
+            (Date::new(2021, 12, 1), 100.0),
+            (Date::new(2022, 1, 1), 150.0),
+            (Date::new(2022, 2, 1), 150.0),
+            (Date::new(2022, 3, 1), 150.0),
+            (Date::new(2022, 4, 1), 150.0),
+            (Date::new(2022, 5, 1), 200.0),
+            (Date::new(2022, 6, 1), 200.0),
+            (Date::new(2022, 7, 1), 200.0),
+            (Date::new(2022, 8, 1), 200.0),
+        ]
+        .iter()
+        .map(|&(date, value)| (date, value))
+        .collect::<BTreeMap<_, _>>();
+
+        let engine =
+            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon)
+                .with_growth_mode(GrowthMode::CustomGrowth)
+                .with_growth_vec(vec![(Period::new(1, TimeUnit::Years), 0.0), (Period::new(2, TimeUnit::Years), 0.0)])?;
+        
+        let strategies = vec![
+            RolloverStrategy::new(
+                0.5,
+                Structure::Bullet,
+                Frequency::Semiannual,
+                Period::new(1, TimeUnit::Years),
+                Side::Pay,
+                RateType::Fixed,
+                RateDefinition::default(),
+                0,
+                None,
+            ),
+            RolloverStrategy::new(
+                0.5,
+                Structure::Bullet,
+                Frequency::Semiannual,
+                Period::new(2, TimeUnit::Years),
+                Side::Pay,
+                RateType::Fixed,
+                RateDefinition::default(),
+                0,
+                None,
+            ),
+        ];
+        let inst = engine.run(strategies)?;
+        let eval_date = Date::new(2023, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
+
+        let eval_date = Date::new(2024, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
+
+        let eval_date = Date::new(2025, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
+
+        let eval_date = Date::new(2026, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
+
+        let eval_date = Date::new(2027, 9, 2);
+        let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        assert_eq!(outstanding, 1800.0);
         Ok(())
     }
 
@@ -492,10 +667,9 @@ mod tests {
         .map(|&(date, value)| (date, value))
         .collect::<BTreeMap<_, _>>();
 
-        let mut engine =
-            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon);
-
-        engine.with_growth_rate(0.1);
+        let engine =
+            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon)
+                .with_growth_rate(0.1);
 
         let strategies = vec![
             RolloverStrategy::new(
@@ -551,10 +725,9 @@ mod tests {
         .map(|&(date, value)| (date, value))
         .collect::<BTreeMap<_, _>>();
 
-        let mut engine =
-            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon);
-
-        engine.with_growth_mode(GrowthMode::Annual);
+        let engine =
+            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon)
+                .with_growth_mode(GrowthMode::Annual);
 
         let strategies = vec![
             RolloverStrategy::new(
@@ -616,12 +789,10 @@ mod tests {
         .map(|&(date, value)| (date, value))
         .collect::<BTreeMap<_, _>>();
 
-        let mut engine =
-            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon);
-
-        engine
-            .with_growth_mode(GrowthMode::Annual)
-            .with_growth_rate(0.1);
+        let engine =
+            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon)
+                .with_growth_mode(GrowthMode::Annual)
+                .with_growth_rate(0.1);
 
         let strategies = vec![
             RolloverStrategy::new(
@@ -652,6 +823,8 @@ mod tests {
         let eval_date = Date::new(2023, 9, 1);
         let delta_date = Actual360::year_fraction(Date::new(2021, 9, 1), eval_date);
         let outstanding = get_outstandings_at_date(&inst, eval_date)?;
+        println!("Outstanding: {}", outstanding);
+        println!("Outstanding Recalculated: {}", 1800.0 * (1.0 + 0.1 * delta_date));
         assert!((outstanding + 1800.0 * (1.0 + 0.1 * delta_date)).abs() < 1e-6);
 
         let eval_date = Date::new(2024, 9, 1);
@@ -662,7 +835,8 @@ mod tests {
     }
 
     #[test]
-    fn test_rollover_simulation_engine_with_anual_growth_mode_and_growth_rate_with_scaling() -> Result<()> {
+    fn test_rollover_simulation_engine_with_anual_growth_mode_and_growth_rate_with_scaling(
+    ) -> Result<()> {
         let market_store = create_store().unwrap();
         let horizon = Period::new(5, TimeUnit::Years);
 
@@ -684,14 +858,11 @@ mod tests {
         .map(|&(date, value)| (date, value))
         .collect::<BTreeMap<_, _>>();
 
-        let mut engine =
-            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon);
-            
-
-        engine
-            .with_growth_mode(GrowthMode::Annual)
-            .with_growth_rate(0.1)
-            .with_scale_factor(1.5);
+        let engine =
+            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon)
+                .with_growth_mode(GrowthMode::Annual)
+                .with_growth_rate(0.1)
+                .with_scale_factor(1.5);
 
         let strategies = vec![
             RolloverStrategy::new(
@@ -754,12 +925,10 @@ mod tests {
         .map(|&(date, value)| (date, value))
         .collect::<BTreeMap<_, _>>();
 
-        let mut engine =
-            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon);
-
-        engine
-            .with_growth_mode(GrowthMode::Annual)
-            .with_growth_rate(0.1);
+        let engine =
+            RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon)
+                .with_growth_mode(GrowthMode::Annual)
+                .with_growth_rate(0.1);
 
         let strategies = vec![
             RolloverStrategy::new(
@@ -822,13 +991,6 @@ mod tests {
         .map(|&(date, value)| (date, value))
         .collect::<BTreeMap<_, _>>();
 
-        let mut engine = RolloverSimulationEngine::new(
-            &market_store,
-            base_redemptions.clone(),
-            Currency::USD,
-            horizon,
-        );
-
         let growth_vec = vec![
             (Period::new(1, TimeUnit::Years), 0.1),
             (Period::new(2, TimeUnit::Years), 0.1),
@@ -837,9 +999,14 @@ mod tests {
             (Period::new(5, TimeUnit::Years), 0.5),
         ];
 
-        engine
-            .with_growth_mode(GrowthMode::CustomGrowth)
-            .with_growth_vec(growth_vec)?;
+        let engine = RolloverSimulationEngine::new(
+            &market_store,
+            base_redemptions.clone(),
+            Currency::USD,
+            horizon,
+        )
+        .with_growth_mode(GrowthMode::CustomGrowth)
+        .with_growth_vec(growth_vec)?;
 
         let strategies = vec![
             RolloverStrategy::new(
@@ -929,13 +1096,6 @@ mod tests {
         .map(|&(date, value)| (date, value))
         .collect::<BTreeMap<_, _>>();
 
-        let mut engine = RolloverSimulationEngine::new(
-            &market_store,
-            base_redemptions.clone(),
-            Currency::USD,
-            horizon,
-        );
-
         let growth_vec = vec![
             (Period::new(2, TimeUnit::Years), 0.1),
             (Period::new(3, TimeUnit::Years), 0.3),
@@ -943,9 +1103,14 @@ mod tests {
             (Period::new(5, TimeUnit::Years), 0.5),
         ];
 
-        engine
-            .with_growth_mode(GrowthMode::CustomGrowth)
-            .with_growth_vec(growth_vec)?;
+        let engine = RolloverSimulationEngine::new(
+            &market_store,
+            base_redemptions.clone(),
+            Currency::USD,
+            horizon,
+        )
+        .with_growth_mode(GrowthMode::CustomGrowth)
+        .with_growth_vec(growth_vec)?;
 
         let strategies = vec![
             RolloverStrategy::new(

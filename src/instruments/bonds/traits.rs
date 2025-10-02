@@ -235,7 +235,7 @@ pub trait InteresAccrualAtYieldRate: HasCashflows + InterestAccrual {
             .filter(|cf| cf.payment_date() >= evaluation_date)
             .try_fold(0.0, |acc, cf| -> Result<f64> {
                 match cf {
-                    Cashflow::FixedRateCoupon(_) => {
+                    Cashflow::FixedRateCoupon(_) | Cashflow::IndexFxCashflow(_) => {
                         let npv = cf.amount()?
                             * rate.discount_factor(evaluation_date, cf.payment_date())
                             * cf.side().sign();

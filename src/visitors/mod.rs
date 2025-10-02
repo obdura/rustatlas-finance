@@ -1,4 +1,4 @@
-pub mod indexingvisitors;
+pub mod fixingvisitor;
 pub mod traits;
 pub mod metricsvisitors;
 pub mod npvvisitors;

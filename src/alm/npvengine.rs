@@ -8,12 +8,14 @@ use rayon::{
 use crate::{
     core::marketstore::MarketStore,
     instruments::loandepos::instrument::Instrument,
-    models::{simplemodel::SimpleModel, traits::Model},
+    models::simplemodel::SimpleModel,
     rates::traits::HasReferenceDate,
     time::date::Date,
     utils::errors::{AtlasError, Result},
     visitors::{
-        indexingvisitors::{fixingvisitor::FixingVisitor, indexingvisitor::IndexingVisitor}, npvvisitors::npvbydateconstvisitor::NPVByDateConstVisitor, traits::{ConstVisit, Visit} 
+        fixingvisitor::fixingvisitor::FixingVisitor,
+        npvvisitors::npvbydateconstvisitor::NPVByDateConstVisitor,
+        traits::{ConstVisit, Visit},
     },
 };
 
@@ -46,22 +48,9 @@ impl<'a> NPVEngine<'a> {
     }
 
     pub fn run(&mut self) -> Result<BTreeMap<Date, f64>> {
-        // indexing
-        let indexing_visitor = IndexingVisitor::new();
-        self.instruments
-            .iter_mut()
-            .try_for_each(|inst| -> Result<()> {
-                indexing_visitor.visit(inst)?;
-                Ok(())
-            })?;
-
-        // market data for base positions
+        // model
         let model = SimpleModel::new(self.market_store);
-        let data = model.gen_market_data(&indexing_visitor.request())?;
-
-        // fixing for base positions
-        let fixing_visitor = FixingVisitor::new(&data);
-
+        let fixing_visitor = FixingVisitor::new(&model);
         self.instruments
             .par_rchunks_mut(self.chunk_size)
             .try_for_each(|chunk| {
@@ -78,7 +67,7 @@ impl<'a> NPVEngine<'a> {
 
         // npv
         let npv_by_date_visitor =
-            NPVByDateConstVisitor::new(self.market_store.reference_date(), &data, false);
+            NPVByDateConstVisitor::new(self.market_store.reference_date(), &model, false);
         let npv_date_map = self
             .instruments
             .par_rchunks(self.chunk_size)

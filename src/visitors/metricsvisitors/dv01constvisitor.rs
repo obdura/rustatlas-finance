@@ -1,26 +1,31 @@
 use crate::{
-    cashflows::{cashflow::Cashflow, traits::{InterestAccrual, Payable}}, core::{meta::MarketData, traits::Registrable}, time::daycounter::DayCounter, utils::errors::{AtlasError, Result}, visitors::traits::{ConstVisit, HasCashflows}
+    cashflows::{
+        cashflow::Cashflow,
+        traits::{InterestAccrual, Payable},
+    },
+    core::traits::Registrable,
+    models::traits::Model,
+    time::daycounter::DayCounter,
+    utils::errors::{AtlasError, Result},
+    visitors::traits::{ConstVisit, HasCashflows},
 };
-
 
 /// # DV01ConstVisitor
 /// DV01ConstVisitor is a visitor that calculates the DV01 of an instrument.
 /// It assumes that the cashflows of the instrument have already been indexed and fixed.
-/// It is analytical calculation using de derviative of the NPV with respect to the interest rat and df 
-/// The calculos assume no lineality in rates and df 
-/// 
+/// It is analytical calculation using de derviative of the NPV with respect to the interest rat and df
+/// The calculos assume no lineality in rates and df
+///
 /// ## Parameters
 /// * `market_data` - The market data to use for NPV calculation
 /// * `include_today_cashflows` - Flag to include cashflows with payment date equal to the reference date
 pub struct DV01ConstVisitor<'a> {
-    market_data: &'a [MarketData],
+    model: &'a dyn Model,
 }
 
 impl<'a> DV01ConstVisitor<'a> {
-    pub fn new(market_data: &'a [MarketData]) -> Self {
-        DV01ConstVisitor {
-            market_data: market_data,
-        }
+    pub fn new(model: &'a dyn Model) -> Self {
+        DV01ConstVisitor { model }
     }
 }
 
@@ -28,43 +33,39 @@ impl<'a, T: HasCashflows> ConstVisit<T> for DV01ConstVisitor<'a> {
     type Output = Result<f64>;
     fn visit(&self, visitable: &T) -> Self::Output {
         let npv = visitable.cashflows().try_fold(0.0, |acc, cf| {
-            let id = cf.id()?;
-            let cf_market_data =
-                self.market_data
-                    .get(id)
-                    .ok_or(AtlasError::NotFoundErr(format!(
-                        "Market data for cashflow with id {}",
-                        id
-                    )))?;
-
-            if cf.payment_date() <= cf_market_data.reference_date()
-            {
+            if cf.payment_date() <= self.model.reference_date() {
                 return Ok(acc);
             }
-                            
-            let year_fraction = DayCounter::Actual365.year_fraction(cf_market_data.reference_date(), cf.payment_date());
-            let df = cf_market_data.df()?;
+
+            let year_fraction =
+                DayCounter::Actual365.year_fraction(self.model.reference_date(), cf.payment_date());
+
+            let df_request = &cf.df_request()?.ok_or(AtlasError::NotFoundErr(format!(
+                "Discount factor request not found"
+            )))?;
+            let df = self.model.gen_df_data(df_request)?;
             let flag = cf.side().sign();
             let amount = cf.amount()?;
 
-            let mut dv01 = - year_fraction * amount* df *0.0001*flag;
+            let mut dv01 = -year_fraction * amount * df * 0.0001 * flag;
 
             match cf {
                 Cashflow::FloatingRateCoupon(frc) => {
                     let day_counter = frc.rate_definition().day_counter();
-                    let delta_year_fraction = if  cf_market_data.reference_date() > frc.accrual_start_date()? {
-                        day_counter.year_fraction(cf_market_data.reference_date(), frc.accrual_end_date()?)
-                    } else {
-                        day_counter.year_fraction(frc.accrual_start_date()?, frc.accrual_end_date()?)
-                    };
-                    dv01 += frc.notional() * delta_year_fraction * df *0.0001*flag;
+                    let delta_year_fraction =
+                        if self.model.reference_date() > frc.accrual_start_date()? {
+                            day_counter
+                                .year_fraction(self.model.reference_date(), frc.accrual_end_date()?)
+                        } else {
+                            day_counter
+                                .year_fraction(frc.accrual_start_date()?, frc.accrual_end_date()?)
+                        };
+                    dv01 += frc.notional() * delta_year_fraction * df * 0.0001 * flag;
                 }
                 _ => {}
             }
 
-
             Ok(acc + dv01)
-
         });
         return npv;
     }
@@ -77,17 +78,25 @@ mod tests {
         sync::{Arc, RwLock},
     };
 
-
     use crate::{
-        cashflows::side::Side, core::marketstore::MarketStore, currencies::enums::Currency, instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument, models::{simplemodel::SimpleModel, traits::Model}, rates::{
+        cashflows::side::Side,
+        core::marketstore::MarketStore,
+        currencies::enums::Currency,
+        instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument,
+        models::simplemodel::SimpleModel,
+        rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
             interestrateindex::{iborindex::IborIndex, overnightindex::OvernightIndex},
             traits::HasReferenceDate,
             yieldtermstructure::flatforwardtermstructure::FlatForwardTermStructure,
-        }, time::{
-            date::Date, daycounter::DayCounter, enums::{Frequency, TimeUnit}, period::Period
-        }, visitors::{indexingvisitors::indexingvisitor::IndexingVisitor, traits::Visit}, 
+        },
+        time::{
+            date::Date,
+            daycounter::DayCounter,
+            enums::{Frequency, TimeUnit},
+            period::Period,
+        },
     };
 
     use super::*;
@@ -116,7 +125,7 @@ mod tests {
                 DayCounter::Thirty360,
                 Compounding::Compounded,
                 Frequency::Annual,
-            )
+            ),
         ));
 
         let mut ibor_fixings = HashMap::new();
@@ -178,7 +187,7 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let mut instrument = MakeFixedRateInstrument::new()
+        let instrument = MakeFixedRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate(rate)
@@ -190,20 +199,13 @@ mod tests {
             .with_notional(notional)
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let dv01 = DV01ConstVisitor::new(&data);
+        let dv01 = DV01ConstVisitor::new(&model);
         let dv01 = dv01.visit(&instrument)?;
 
         println!("DV01: {}", dv01);
 
         todo!("Implement test");
-
     }
-
 }
-

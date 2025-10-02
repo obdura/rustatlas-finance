@@ -1,63 +1,58 @@
 use crate::{
-    cashflows::{cashflow::Cashflow, traits::Payable}, core::{meta::MarketData, traits::Registrable}, time::daycounter::DayCounter, utils::errors::{AtlasError, Result}, visitors::traits::{ConstVisit, HasCashflows}
+    cashflows::{cashflow::Cashflow, traits::Payable},
+    core::traits::Registrable,
+    models::traits::Model,
+    time::daycounter::DayCounter,
+    utils::errors::{AtlasError, Result},
+    visitors::traits::{ConstVisit, HasCashflows},
 };
-
 
 /// # DurationConstVisitor
 /// DurationConstVisitor is a visitor that calculates the Duration of an instrument.
-/// It assumes that the cashflows of the instrument have already been indexed and fixed.
+/// It assumes that the cashflows of the instrument have already been fixed.
 ///
 /// ## Parameters
 /// * `market_data` - The market data to use for Duration calculation
 /// * `include_today_cashflows` - Flag to include cashflows with payment date equal to the reference date
 pub struct DurationConstVisitor<'a> {
-    market_data: &'a [MarketData],
+    model: &'a dyn Model,
 }
 
 impl<'a> DurationConstVisitor<'a> {
-    pub fn new(market_data: &'a [MarketData]) -> Self {
-        DurationConstVisitor {
-            market_data: market_data,
-        }
+    pub fn new(model: &'a dyn Model) -> Self {
+        DurationConstVisitor { model }
     }
 }
 
 impl<'a, T: HasCashflows> ConstVisit<T> for DurationConstVisitor<'a> {
     type Output = Result<f64>;
     fn visit(&self, visitable: &T) -> Self::Output {
-        let duration = visitable
-            .cashflows()
-            .try_fold((0.0, 0.0), |mut acc, cf| {
-                let id = cf.id()?;
+        let duration = visitable.cashflows().try_fold((0.0, 0.0), |mut acc, cf| {
+            match cf {
+                Cashflow::Disbursement(_) => return Ok(acc),
+                _ => {}
+            };
 
-                let cf_market_data =
-                    self.market_data
-                        .get(id)
-                        .ok_or(AtlasError::NotFoundErr(format!(
-                            "Market data for cashflow with id {}",
-                            id
-                        )))?;
+            let year_fraction =
+                DayCounter::Actual365.year_fraction(self.model.reference_date(), cf.payment_date());
 
+            let df_request = &cf.df_request()?.ok_or(AtlasError::NotFoundErr(format!(
+                "Discount factor request not found"
+            )))?;
+            let df = self.model.gen_df_data(df_request)?;
+            let fx_request = &cf.fx_request()?.ok_or(AtlasError::NotFoundErr(format!(
+                "Exchange rate request not found"
+            )))?;
+            let fx = self.model.gen_fx_data(fx_request)?;
+            let flag = cf.side().sign();
 
-                match cf {
-                    Cashflow::Disbursement(_) => return Ok(acc),
-                    _ => {}
-                };
-                
-                let year_fraction = DayCounter::Actual365
-                    .year_fraction(cf_market_data.reference_date(), cf.payment_date());
+            let aux_amount = cf.amount()? * df / fx * flag;
 
-                let df = cf_market_data.df()?;
-                let fx = cf_market_data.fx()?;
-                let flag = cf.side().sign();
+            acc.0 += aux_amount.clone() * year_fraction;
+            acc.1 += aux_amount.clone();
 
-                let aux_amount = cf.amount()? * df / fx * flag;
-
-                acc.0 += aux_amount.clone() * year_fraction;
-                acc.1 += aux_amount.clone();
-
-                Ok(acc)
-            });
+            Ok(acc)
+        });
 
         match duration {
             Ok((d1, d2)) => Ok(d1 / d2),
@@ -80,18 +75,27 @@ mod tests {
     };
 
     use crate::{
-        cashflows::side::Side, core::marketstore::MarketStore, currencies::enums::Currency, instruments::{constructors::makefixedrateinstrument::MakeFixedRateInstrument, loandepos::fixedrateinstrument::FixedRateInstrument}, models::{simplemodel::SimpleModel, traits::Model}, rates::{
+        cashflows::side::Side,
+        core::marketstore::MarketStore,
+        currencies::enums::Currency,
+        instruments::{
+            constructors::makefixedrateinstrument::MakeFixedRateInstrument,
+            loandepos::fixedrateinstrument::FixedRateInstrument,
+        },
+        models::simplemodel::SimpleModel,
+        rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
             interestrateindex::{iborindex::IborIndex, overnightindex::OvernightIndex},
             traits::HasReferenceDate,
             yieldtermstructure::flatforwardtermstructure::FlatForwardTermStructure,
-        }, time::{
+        },
+        time::{
             date::Date,
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }, visitors::{indexingvisitors::indexingvisitor::IndexingVisitor, traits::Visit},
+        },
     };
 
     use super::*;
@@ -200,15 +204,10 @@ mod tests {
         fn duration(instruments: &mut [FixedRateInstrument]) -> f64 {
             let store = create_store().unwrap();
             let mut duration = 0.0;
-            let indexer = IndexingVisitor::new();
-            instruments
-                .iter_mut()
-                .for_each(|inst| indexer.visit(inst).unwrap());
 
             let model = SimpleModel::new(&store);
-            let data = model.gen_market_data(&indexer.request()).unwrap();
 
-            let duration_visitor = DurationConstVisitor::new(&data);
+            let duration_visitor = DurationConstVisitor::new(&model);
             instruments
                 .iter()
                 .for_each(|inst| duration += duration_visitor.visit(inst).unwrap());

@@ -1,5 +1,10 @@
 use crate::{
-    cashflows::{cashflow::Cashflow, simplecashflow::SimpleCashflow, traits::Payable}, core::traits::{HasCurrency, Registrable}, instruments::loandepos::doublerateinstrument::DoubleRateInstrument, math::solver::{brentroot::BrentRoot, traits::CostFunction}, utils::errors::Result, visitors::traits::{ConstVisit, HasCashflows, Visit}
+    cashflows::{cashflow::Cashflow, simplecashflow::SimpleCashflow, traits::Payable},
+    core::traits::{HasCurrency, HasDiscountCurveId},
+    instruments::loandepos::doublerateinstrument::DoubleRateInstrument,
+    math::solver::{brentroot::BrentRoot, traits::CostFunction},
+    utils::errors::Result,
+    visitors::traits::{ConstVisit, HasCashflows, Visit},
 };
 
 use super::traits::{ParValue, ParValueConstVisitor};
@@ -72,17 +77,17 @@ impl<'a> ConstVisit<DoubleRateInstrument> for ParValueConstVisitor<'a> {
         let id = first_part_cashflows
             .iter()
             .filter(|cf| cf.payment_date() == change_rate_date)
-            .map(|cf| cf.id())
+            .map(|cf| cf.discount_curve_id())
             .collect::<Result<Vec<usize>>>()?[0];
 
         let sc = SimpleCashflow::new(change_rate_date, currency, side)
             .with_amount(notional_at_change_rate)
-            .with_id(id);
+            .with_discount_curve_id(id);
         first_part_cashflows.push(Cashflow::Redemption(sc));
 
         let sc = SimpleCashflow::new(change_rate_date, currency, side.inverse())
             .with_amount(notional_at_change_rate)
-            .with_id(id);
+            .with_discount_curve_id(id);
         second_part_cashflows.push(Cashflow::Disbursement(sc));
 
         let tmp_inst_fp = TmpInstrument::new(first_part_cashflows);
@@ -90,12 +95,12 @@ impl<'a> ConstVisit<DoubleRateInstrument> for ParValueConstVisitor<'a> {
 
         let (min, max) = (-1.0, 1.0);
 
-        let cost = ParValue::new(&tmp_inst_fp, self.market_data);
+        let cost = ParValue::new(&tmp_inst_fp, self.model);
         let solver = BrentRoot::new(cost, min, max);
         let res = solver.solve()?;
         let first_rate_par_value = res.root;
 
-        let cost = ParValue::new(&tmp_inst_sp, self.market_data);
+        let cost = ParValue::new(&tmp_inst_sp, self.model);
         let solver = BrentRoot::new(cost, min, max);
         let res = solver.solve()?;
         let second_rate_par_value = res.root;
@@ -105,7 +110,7 @@ impl<'a> ConstVisit<DoubleRateInstrument> for ParValueConstVisitor<'a> {
 }
 
 #[cfg(test)]
-mod tests{
+mod tests {
     use super::*;
     use crate::{
         cashflows::side::Side,
@@ -114,7 +119,7 @@ mod tests{
         instruments::{
             constructors::makedoublerateinstrument::MakeDoubleRateInstrument, traits::RateType,
         },
-        models::{simplemodel::SimpleModel, traits::Model},
+        models::simplemodel::SimpleModel,
         rates::{
             enums::Compounding,
             interestrate::RateDefinition,
@@ -127,7 +132,7 @@ mod tests{
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }, visitors::indexingvisitors::indexingvisitor::IndexingVisitor,
+        },
     };
     use std::{
         collections::HashMap,
@@ -235,7 +240,7 @@ mod tests{
 
         let second_part_rate = 0.02;
 
-        let mut instrument = MakeDoubleRateInstrument::new()
+        let instrument = MakeDoubleRateInstrument::new()
             .with_start_date(start_date)
             .with_tenor(Period::new(9, TimeUnit::Years))
             .with_change_rate_tenor(Period::new(4, TimeUnit::Years))
@@ -253,13 +258,9 @@ mod tests{
             .with_forecast_curve_id(Some(1))
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let parvaluevisitor = ParValueConstVisitor::new(&data);
+        let parvaluevisitor = ParValueConstVisitor::new(&model);
         let (first_rate_par_value, second_rate_par_value) = parvaluevisitor.visit(&instrument)?;
 
         print!(
@@ -295,7 +296,7 @@ mod tests{
 
         let second_part_rate = 0.02;
 
-        let mut instrument = MakeDoubleRateInstrument::new()
+        let instrument = MakeDoubleRateInstrument::new()
             .with_start_date(start_date)
             .with_tenor(Period::new(9, TimeUnit::Years))
             .with_change_rate_tenor(Period::new(4, TimeUnit::Years))
@@ -313,13 +314,9 @@ mod tests{
             .with_forecast_curve_id(Some(1))
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let parvaluevisitor = ParValueConstVisitor::new(&data);
+        let parvaluevisitor = ParValueConstVisitor::new(&model);
         let (first_rate_par_value, second_rate_par_value) = parvaluevisitor.visit(&instrument)?;
 
         print!(
@@ -355,7 +352,7 @@ mod tests{
 
         let second_part_rate = 0.02;
 
-        let mut instrument = MakeDoubleRateInstrument::new()
+        let instrument = MakeDoubleRateInstrument::new()
             .with_start_date(start_date)
             .with_tenor(Period::new(9, TimeUnit::Years))
             .with_change_rate_tenor(Period::new(4, TimeUnit::Years))
@@ -373,13 +370,9 @@ mod tests{
             .with_forecast_curve_id(Some(1))
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let parvaluevisitor = ParValueConstVisitor::new(&data);
+        let parvaluevisitor = ParValueConstVisitor::new(&model);
         let (first_rate_par_value, second_rate_par_value) = parvaluevisitor.visit(&instrument)?;
 
         print!(
@@ -392,7 +385,4 @@ mod tests{
 
         Ok(())
     }
-
-
-    
 }

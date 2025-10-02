@@ -20,7 +20,7 @@ use std::fmt::Display;
 pub struct Leg {
     negotiation_date: Option<Date>,
     start_date: Date,
-    end_date: Date, // maturity date
+    end_date: Date,          // maturity date
     last_payment_date: Date, // last payment date
     notional: f64,
     payment_frequency: Frequency,
@@ -33,7 +33,7 @@ pub struct Leg {
     discount_curve_id: Option<usize>,
     forecast_curve_id: Option<usize>,
     cashflows: Vec<Cashflow>,
-    mtm: Option<f64>
+    mtm: Option<f64>,
 }
 
 impl Leg {
@@ -58,7 +58,7 @@ impl Leg {
             negotiation_date,
             start_date,
             end_date,
-            last_payment_date, 
+            last_payment_date,
             notional,
             payment_frequency,
             structure,
@@ -70,7 +70,7 @@ impl Leg {
             discount_curve_id,
             forecast_curve_id,
             cashflows,
-            mtm: None
+            mtm: None,
         }
     }
 
@@ -88,7 +88,7 @@ impl Leg {
 
     pub fn last_payment_date(&self) -> Date {
         self.last_payment_date
-    }   
+    }
 
     pub fn notional(&self) -> f64 {
         self.notional
@@ -140,16 +140,14 @@ impl Leg {
 
     pub fn set_rate_value(mut self, rate_value: f64) -> Self {
         self.rate_value = rate_value;
-        self.mut_cashflows().for_each(|cashflow| {
-            match cashflow {
-                Cashflow::FixedRateCoupon(coupon) => {
-                    coupon.set_rate_value(rate_value);
-                }
-                Cashflow::FloatingRateCoupon(coupon) => {
-                    coupon.set_spread(rate_value);
-                }
-                _ => {}
+        self.mut_cashflows().for_each(|cashflow| match cashflow {
+            Cashflow::FixedRateCoupon(coupon) => {
+                coupon.set_rate_value(rate_value);
             }
+            Cashflow::FloatingRateCoupon(coupon) => {
+                coupon.set_spread(rate_value);
+            }
+            _ => {}
         });
         self
     }
@@ -211,16 +209,66 @@ impl InterestAccrual for Leg {
 use colored::*;
 impl Display for Leg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "\t{} {}", "rate type:".bold().magenta(), self.rate_type().to_string().cyan())?;
-        writeln!(f, "\t{} {}", "side:".bold().magenta(), self.side().to_string().cyan())?;
-        writeln!(f, "\t{} {}", "notional:".bold().magenta(), self.notional().to_string().cyan())?;
-        writeln!(f, "\t{} {}", "currency:".bold().magenta(), self.currency().to_string().cyan())?;
-        writeln!(f, "\t{} {}", "start_date:".bold().magenta(), self.start_date().to_string().cyan())?;
-        writeln!(f, "\t{} {}", "end_date:".bold().magenta(), self.end_date().to_string().cyan())?;
-        writeln!(f, "\t{} {}", "structure:".bold().magenta(), self.structure().to_string().cyan())?;
-        writeln!(f, "\t{} {}", "payment_frequency:".bold().magenta(), self.payment_frequency().to_string().cyan())?;
-        writeln!(f, "\t{} {}", "rate definition:".bold().magenta(), self.rate_definition().to_string().cyan())?;
-        writeln!(f, "\t{} {}", "rate/spread value:".bold().magenta(), self.rate_value().to_string().cyan())?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "rate type:".bold().magenta(),
+            self.rate_type().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "side:".bold().magenta(),
+            self.side().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "notional:".bold().magenta(),
+            self.notional().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "currency:".bold().magenta(),
+            self.currency().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "start_date:".bold().magenta(),
+            self.start_date().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "end_date:".bold().magenta(),
+            self.end_date().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "structure:".bold().magenta(),
+            self.structure().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "payment_frequency:".bold().magenta(),
+            self.payment_frequency().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "rate definition:".bold().magenta(),
+            self.rate_definition().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "rate/spread value:".bold().magenta(),
+            self.rate_value().to_string().cyan()
+        )?;
         writeln!(f, "\t{}", "cashflows:".bold().magenta())?;
         // Group cashflows by payment date and print them in order
         let btree_map =
@@ -233,7 +281,7 @@ impl Display for Leg {
                 });
         for (_, cashflows) in btree_map.iter() {
             for cf in cashflows {
-                write!(f,"{}","\t\t-> ".white().bold())?;
+                write!(f, "{}", "\t\t-> ".white().bold())?;
                 writeln!(f, "{}", cf)?;
             }
         }
@@ -248,13 +296,13 @@ mod tests {
         sync::{Arc, RwLock},
     };
 
-    use crate::utils::errors::Result;
+    use crate::{utils::errors::Result, visitors::npvvisitors::npvconstvisitor::NPVConstVisitor};
     use crate::{
         cashflows::side::Side,
         core::marketstore::MarketStore,
         currencies::enums::Currency,
         instruments::constructors::makefixedrateleg::MakeFixedRateLeg,
-        models::{simplemodel::SimpleModel, traits::Model},
+        models::simplemodel::SimpleModel,
         rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
@@ -268,12 +316,7 @@ mod tests {
             enums::{Frequency, TimeUnit},
             period::Period,
         },
-        visitors::{
-            indexingvisitors::indexingvisitor::IndexingVisitor,
-            npvvisitors::npvconstvisitor::NPVConstVisitor,
-            parvaluevisitors::traits::ParValueConstVisitor,
-            traits::{ConstVisit, Visit},
-        },
+        visitors::{parvaluevisitors::traits::ParValueConstVisitor, traits::ConstVisit},
     };
 
     pub fn create_store() -> Result<MarketStore> {
@@ -370,7 +413,7 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let mut instrument = MakeFixedRateLeg::new()
+        let instrument = MakeFixedRateLeg::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate(rate)
@@ -382,13 +425,9 @@ mod tests {
             .with_discount_curve_id(Some(2))
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let npv_visitor = NPVConstVisitor::new(&data, true);
+        let npv_visitor = NPVConstVisitor::new(&model, true);
         let npv = npv_visitor.visit(&instrument)?;
         assert!((npv - 100_000.0).abs() < 1e-6);
 
@@ -410,7 +449,7 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let mut instrument = MakeFixedRateLeg::new()
+        let instrument = MakeFixedRateLeg::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate(rate)
@@ -422,13 +461,9 @@ mod tests {
             .with_discount_curve_id(Some(2))
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let npv_visitor = NPVConstVisitor::new(&data, true);
+        let npv_visitor = NPVConstVisitor::new(&model, true);
         let npv = npv_visitor.visit(&instrument)?;
         assert!((npv + 100_000.0).abs() < 1e-6);
 
@@ -450,7 +485,7 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let mut instrument = MakeFixedRateLeg::new()
+        let instrument = MakeFixedRateLeg::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate(rate)
@@ -463,25 +498,21 @@ mod tests {
             .with_notional(notional)
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
 
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let nvp_visitor = NPVConstVisitor::new(&data, true);
+        let nvp_visitor = NPVConstVisitor::new(&model, true);
         let npv = nvp_visitor.visit(&instrument)?;
 
         assert!((npv - 100_000.0).abs() < 1e-6);
-        
-        let parvaluevisitor = ParValueConstVisitor::new_with_target_cost(&data, notional);
+
+        let parvaluevisitor = ParValueConstVisitor::new_with_target_cost(&model, notional);
         let par_value = parvaluevisitor.visit(&instrument)?;
 
-        assert!((par_value - 0.05).abs() < 1e-6);          
+        assert!((par_value - 0.05).abs() < 1e-6);
         Ok(())
     }
 
-    
     #[test]
     fn test_parvalue_leg_pay() -> Result<()> {
         let market_store = create_store()?;
@@ -497,7 +528,7 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let mut instrument = MakeFixedRateLeg::new()
+        let instrument = MakeFixedRateLeg::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate(rate)
@@ -510,20 +541,16 @@ mod tests {
             .with_notional(notional)
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let nvp_visitor = NPVConstVisitor::new(&data, true);
+        let nvp_visitor = NPVConstVisitor::new(&model, true);
         let npv = nvp_visitor.visit(&instrument)?;
 
         assert!((npv + 100_000.0).abs() < 1e-6);
-        
-        let parvaluevisitor = ParValueConstVisitor::new_with_target_cost(&data, npv);
+
+        let parvaluevisitor = ParValueConstVisitor::new_with_target_cost(&model, npv);
         let par_value = parvaluevisitor.visit(&instrument)?;
-        assert!((par_value - 0.05).abs() < 1e-6);          
+        assert!((par_value - 0.05).abs() < 1e-6);
         Ok(())
     }
 

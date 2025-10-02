@@ -161,7 +161,7 @@ impl<T: HasCashflows> ConstVisit<T> for CashflowCompressorConstVisitor {
     type Output = Result<()>;
 
     fn visit(&self, visitable: &T) -> Self::Output {
-        visitable.cashflows().try_for_each(|&cf| -> Result<()> {
+        visitable.cashflows().try_for_each(|cf| -> Result<()> {
             // validate that the cashflow currency is the same as the instrument currency
             if cf.currency()? != self.currency {
                 return Err(AtlasError::InvalidValueErr(format!(
@@ -305,6 +305,11 @@ impl<T: HasCashflows> ConstVisit<T> for CashflowCompressorConstVisitor {
                     } else {
                         *estimated_start_date = Some(cf.accrual_start_date().unwrap());
                     }
+                }
+                Cashflow::IndexFxCashflow(_cashflow) => {
+                    Err(AtlasError::InvalidValueErr(
+                        "IndexFxCashflow cashflow are not supported in compressor visitor".to_string(),
+                    ))?
                 }
             }
             Ok(())

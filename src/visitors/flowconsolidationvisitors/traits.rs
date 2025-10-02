@@ -211,7 +211,6 @@ mod tests{
             let placements_at_date = placements.get(&date).unwrap_or(&0.0);
             let not_pay_interest_at_date = not_pay_interest.get(&date).unwrap_or(&0.0);
             let cupon_interest_at_date = cupon_interest.get(&date).unwrap_or(&0.0);
-
             println!("date: {}, outstandings: {:.2}, redemptions: {:.2}, placements: {:.2}, accrued_amount: {:.7}, notPayInterest: {:.7}, cupon_interest: {:.7}", date, outstandings_at_date, redemptions_at_date, placements_at_date, accrued_amount_at_date, not_pay_interest_at_date, cupon_interest_at_date);
             date = date + Period::new(1, TimeUnit::Days);
         }

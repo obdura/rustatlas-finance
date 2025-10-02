@@ -237,7 +237,7 @@ impl fmt::Display for MarketStore {
             "> Currency pairs:".green().bold(),
             exchange_rate_map.len()
         )?;
-        for (currencies, value) in &exchange_rate_map {
+        for (currencies, value) in exchange_rate_map {
             writeln!(
                 f,
                 "  >> {} -> {}: {}",

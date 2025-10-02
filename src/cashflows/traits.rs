@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{currencies::enums::Currency, time::date::Date, utils::errors::Result};
+use crate::{currencies::{enums::Currency, exchangerategeneration::ExchangeGenerationMethod}, time::date::Date, utils::errors::Result};
 
 use super::side::Side;
 
@@ -54,9 +54,16 @@ pub trait RequiresFixingRate: InterestAccrual {
     fn fixing_start_date(&self) -> Result<Option<Date>> {
         self.accrual_start_date().map(Some)
     }
+    
     fn fixing_end_date(&self) -> Result<Option<Date>> {
         self.accrual_end_date().map(Some)
     }
+}
+
+/// #  RequiresFixingExchangeRate
+/// A trait for objects that have a fixing exchange rate.
+pub trait RequiresFixingExchangeRate {
+    fn set_fixing_exchange_rate(&mut self, fixing_exchange_rate: f64);
 }
 
 /// # Payable
@@ -66,7 +73,7 @@ pub trait Payable {
     fn side(&self) -> Side;
     fn payment_date(&self) -> Date;
     fn payment_currency(&self) -> Result<Currency>;
-    fn exchange_fixing_date(&self) -> Result<Date>;
+    fn exchange_fixing_method(&self) -> Result<&Option<ExchangeGenerationMethod>>;
 }
 
 /// # Expires
@@ -218,9 +225,9 @@ mod tests {
             fn payment_currency(&self) -> Result<Currency> {
                 Ok(Currency::USD)
             }
-            fn exchange_fixing_date(&self) -> Result<Date> {
-                Ok(Date::new(2023, 12, 31))
-            }
+            fn exchange_fixing_method(&self) -> Result<&Option<ExchangeGenerationMethod>> {
+                Ok(&None)
+            }	
         }
 
         let dummy = DummyPayable;
@@ -229,8 +236,8 @@ mod tests {
         assert_eq!(dummy.payment_date(), Date::new(2024, 1, 1));
         assert_eq!(dummy.payment_currency().unwrap(), Currency::USD);
         assert_eq!(
-            dummy.exchange_fixing_date().unwrap(),
-            Date::new(2023, 12, 31)
+            dummy.exchange_fixing_method().unwrap(),
+            &None
         );
     }
 

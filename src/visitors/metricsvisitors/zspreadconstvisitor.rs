@@ -1,7 +1,8 @@
 use crate::{
     cashflows::{cashflow::Cashflow, traits::Payable},
-    core::{meta::MarketData, traits::Registrable},
+    core::traits::Registrable,
     math::solver::{brentopt::BrentOpt, traits::CostFunction},
+    models::traits::Model,
     rates::interestrate::{InterestRate, RateDefinition},
     utils::errors::{AtlasError, Result},
     visitors::traits::{ConstVisit, HasCashflows},
@@ -15,19 +16,19 @@ use crate::{
 /// * `rate_definition` - The rate definition to use for the given spread
 /// * `target` - The target npv to match the spread calculation
 pub struct ZSpreadConstVisitor<'a> {
-    market_data: &'a [MarketData],
+    model: &'a dyn Model,
     rate_definition: RateDefinition,
     target: f64,
 }
 
 impl<'a> ZSpreadConstVisitor<'a> {
     pub fn new(
-        market_data: &'a [MarketData],
+        model: &'a dyn Model,
         rate_definition: RateDefinition,
         target: f64,
     ) -> Self {
         ZSpreadConstVisitor {
-            market_data,
+            model,
             rate_definition,
             target,
         }
@@ -36,7 +37,7 @@ impl<'a> ZSpreadConstVisitor<'a> {
 
 struct SpreadedNPV<'a, T> {
     eval: &'a T,
-    market_data: &'a [MarketData],
+    model: &'a dyn Model,
     rate_definition: RateDefinition,
     target: f64,
 }
@@ -46,25 +47,19 @@ where
     T: HasCashflows,
 {
     fn cashflow_npv(&self, cf: &Cashflow, spread: f64) -> Result<f64> {
-        let id = cf.id()?;
-        let data = self
-            .market_data
-            .get(id)
-            .ok_or(AtlasError::NotFoundErr(format!(
-                "Market data for cashflow with id {}",
-                id
-            )))?;
-
         let t = self
             .rate_definition
             .day_counter()
-            .year_fraction(data.reference_date(), cf.payment_date());
+            .year_fraction(self.model.reference_date(), cf.payment_date());
 
         if t < 0.0 {
             return Ok(0.0);
         }
 
-        let df = data.df()?;
+        let df_request = &cf.df_request()?.ok_or(AtlasError::NotFoundErr(format!(
+                "Discount factor request not found"
+            )))?;
+        let df = self.model.gen_df_data(df_request)?;
         let implied_df_rate = InterestRate::implied_rate(
             1.0 / df,
             self.rate_definition.day_counter(),
@@ -112,11 +107,10 @@ where
     T: HasCashflows,
 {
     type Output = Result<f64>;
-
     fn visit(&self, visitable: &T) -> Self::Output {
         let npv = SpreadedNPV {
             eval: visitable,
-            market_data: self.market_data,
+            model: self.model,
             rate_definition: self.rate_definition,
             target: self.target,
         };
@@ -137,7 +131,7 @@ mod tests {
         core::marketstore::MarketStore,
         currencies::enums::Currency,
         instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument,
-        models::{simplemodel::SimpleModel, traits::Model},
+        models::simplemodel::SimpleModel,
         rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
@@ -152,10 +146,9 @@ mod tests {
             period::Period,
         },
         utils::errors::Result,
-        visitors::{
-            indexingvisitors::indexingvisitor::IndexingVisitor,
-            traits::{ConstVisit, Visit},
-        },
+        visitors::
+            traits::ConstVisit
+        ,
     };
 
     use super::ZSpreadConstVisitor;
@@ -200,7 +193,7 @@ mod tests {
             ),
         );
 
-        let mut instrument = MakeFixedRateInstrument::new()
+        let instrument = MakeFixedRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate(rate)
@@ -213,22 +206,17 @@ mod tests {
             .build()?;
 
         let market_store = create_store()?;
-        let indexer = IndexingVisitor::new();
-        let _ = indexer.visit(&mut instrument);
 
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
         let zspread_rate_definition = RateDefinition::new(
             DayCounter::Actual360,
             Compounding::Continuous,
             Frequency::Semiannual,
         );
-        let zspread_visitor = ZSpreadConstVisitor::new(&data, zspread_rate_definition, 100.0);
+        let zspread_visitor = ZSpreadConstVisitor::new(&model, zspread_rate_definition, 100.0);
 
         let zspread = zspread_visitor.visit(&instrument)?;
         println!("ZSpread: {}", zspread * 100.0);
         Ok(())
     }
-
-    
 }

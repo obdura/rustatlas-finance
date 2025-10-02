@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     fmt::Display,
 };
 
@@ -11,14 +11,14 @@ use crate::{
         side::Side,
         traits::{InterestAccrual, Payable, Scalable},
     },
-    core::traits::{HasCurrency, Registrable},
+    core::traits::HasCurrency,
     currencies::enums::Currency,
     instruments::{
-        constructors::makefixedrateinstrument::MakeFixedRateInstrument, traits::Structure
+        constructors::makefixedrateinstrument::MakeFixedRateInstrument, traits::Structure,
     },
     rates::interestrate::InterestRate,
     time::{date::Date, enums::Frequency},
-    utils::errors::{AtlasError, Result},
+    utils::errors::Result,
     visitors::traits::HasCashflows,
 };
 
@@ -141,8 +141,6 @@ impl FixedRateInstrument {
                 let mut new_cashflows = Vec::new();
                 std::mem::swap(&mut tmp_inst.cashflows, &mut new_cashflows);
 
-                re_indexing_cashflows_for_equal_payment_instrument(&mut new_cashflows, &old_cashflows)?;
-
                 std::mem::swap(&mut self.cashflows, &mut new_cashflows);
             }
             _ => {
@@ -213,67 +211,6 @@ impl Scalable for FixedRateInstrument {
     }
 }
 
-fn re_indexing_cashflows_for_equal_payment_instrument(
-    new_cashflows: &mut Vec<Cashflow>,
-    old_cashflows: &Vec<Cashflow>,
-) -> Result<()> {
-    let (redemptions_map, disbursements_map, coupon_map) = old_cashflows.iter().fold(
-        (HashMap::new(), HashMap::new(), HashMap::new()),
-        |(mut redemptions, mut disbursements, mut coupons), cashflow| {
-            match cashflow {
-                Cashflow::Redemption(c) => {
-                    if let Ok(id) = c.id() {
-                        redemptions.insert(c.payment_date(), id);
-                    }
-                }
-                Cashflow::Disbursement(c) => {
-                    if let Ok(id) = c.id() {
-                        disbursements.insert(c.payment_date(), id);
-                    }
-                }
-                Cashflow::FixedRateCoupon(c) => {
-                    if let Ok(id) = c.id() {
-                        coupons.insert(c.payment_date(), id);
-                    }
-                }
-                _ => {}
-            }
-            (redemptions, disbursements, coupons)
-        },
-    );
-
-    let _ = new_cashflows.iter_mut().try_for_each(|cf| -> Result<()> {
-        match cf {
-            Cashflow::FixedRateCoupon(_) => {
-                if let Some(id) = coupon_map.get(&cf.payment_date()) {
-                    cf.set_id(*id);
-                }
-                Ok(())
-            }
-            Cashflow::Redemption(_) => {
-                if let Some(id) = redemptions_map.get(&cf.payment_date()) {
-                    cf.set_id(*id);
-                } else if let Some(id) = disbursements_map.get(&cf.payment_date()) {
-                    cf.set_id(*id);
-                } 
-                Ok(())
-            }
-            Cashflow::Disbursement(_) => {
-                if let Some(id) = disbursements_map.get(&cf.payment_date()) {
-                    cf.set_id(*id);
-                } else if let Some(id) = redemptions_map.get(&cf.payment_date()) {
-                    cf.set_id(*id);
-                }
-                Ok(())
-            }
-            _ => {
-                Err(AtlasError::IndexingErr("not supported cashflow type for equal payment instrument".to_string()))
-            }
-        }
-    });
-    Ok(())
-}
-
 /// # Display
 /// Implement the display for FixedRateInstrument.
 impl Display for FixedRateInstrument {
@@ -316,12 +253,18 @@ mod tests {
             cashflow::Cashflow,
             side::Side,
             traits::{Payable, Scalable},
-        }, core::traits::Registrable, currencies::enums::Currency, instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument, rates::{enums::Compounding, interestrate::InterestRate}, time::{
+        },
+        currencies::enums::Currency,
+        instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument,
+        rates::{enums::Compounding, interestrate::InterestRate},
+        time::{
             date::Date,
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }, utils::errors::Result, visitors::traits::HasCashflows
+        },
+        utils::errors::Result,
+        visitors::traits::HasCashflows,
     };
 
     #[test]
@@ -570,43 +513,6 @@ mod tests {
             }
             _ => {}
         });
-        Ok(())
-    }
-
-    #[test]
-    fn test_reindexing() -> Result<()> {
-        let start_date = Date::new(2020, 1, 1);
-        let end_date = start_date + Period::new(5, TimeUnit::Years);
-        let rate = InterestRate::new(
-            0.05,
-            Compounding::Compounded,
-            Frequency::Annual,
-            DayCounter::Actual360,
-        );
-        let notional = 100.0;
-        let mut instrument = MakeFixedRateInstrument::new()
-            .with_start_date(start_date)
-            .with_end_date(end_date)
-            .with_payment_frequency(Frequency::Semiannual)
-            .with_rate(rate)
-            .with_notional(notional)
-            .with_discount_curve_id(Some(0))
-            .with_side(Side::Receive)
-            .with_currency(Currency::USD)
-            .equal_payments()
-            .build()?;
-
-        instrument.mut_cashflows().for_each(|cf| cf.set_id(0));
-        instrument.cashflows().for_each(|cf| assert!(cf.id().unwrap() == 0));
-
-        let new_instrument = instrument.set_rate(InterestRate::new(
-            0.06,
-            Compounding::Compounded,
-            Frequency::Annual,
-            DayCounter::Actual360,
-        ))?;
-
-        new_instrument.cashflows().for_each(|cf| assert!(cf.id().unwrap() == 0));
         Ok(())
     }
 }

@@ -5,7 +5,11 @@ use std::{
 
 use super::{enums::Currency, traits::AdvanceExchangeRateStoreInTime};
 
-use crate::{rates::indexstore::IndexStore, time::{date::Date, period::Period}, utils::errors::{AtlasError, Result}};
+use crate::{
+    rates::indexstore::IndexStore,
+    time::{date::Date, period::Period},
+    utils::errors::{AtlasError, Result},
+};
 
 /// # ExchangeRateStore
 /// A store for exchange rates.
@@ -14,19 +18,22 @@ use crate::{rates::indexstore::IndexStore, time::{date::Date, period::Period}, u
 /// ## Details
 /// - Exchange rates are stored as a map of pairs of currencies to rates.
 /// - The exchange rate between two currencies is calculated by traversing the graph of exchange rates.
+/// - Exchange rate history is stored as a map of pairs of currencies to maps of dates to rates.
 #[derive(Clone)]
 pub struct ExchangeRateStore {
     reference_date: Date,
     exchange_rate_map: HashMap<(Currency, Currency), f64>,
     exchange_rate_cache: Arc<Mutex<HashMap<(Currency, Currency), f64>>>,
+    exchange_rate_history: HashMap<(Currency, Currency), HashMap<Date, f64>>,
 }
 
 impl ExchangeRateStore {
-    pub fn new(date : Date) -> ExchangeRateStore {
+    pub fn new(date: Date) -> ExchangeRateStore {
         ExchangeRateStore {
             reference_date: date,
             exchange_rate_map: HashMap::new(),
             exchange_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            exchange_rate_history: HashMap::new(),
         }
     }
 
@@ -38,12 +45,27 @@ impl ExchangeRateStore {
         self
     }
 
+    pub fn with_exchange_rates_history(
+        mut self,
+        exchange_rate_map_history: HashMap<(Currency, Currency), HashMap<Date, f64>>,
+    ) -> Self {
+        self.exchange_rate_history = exchange_rate_map_history;
+        self
+    }
+
     pub fn set_exchange_rates(
         &mut self,
         exchange_rate_map: HashMap<(Currency, Currency), f64>,
-    ) -> Result<()>
-    {
+    ) -> Result<()> {
         self.exchange_rate_map = exchange_rate_map;
+        Ok(())
+    }
+
+    pub fn set_exchange_rates_history(
+        &mut self,
+        exchange_rate_map_history: HashMap<(Currency, Currency), HashMap<Date, f64>>,
+    ) -> Result<()> {
+        self.exchange_rate_history = exchange_rate_map_history;
         Ok(())
     }
 
@@ -51,12 +73,32 @@ impl ExchangeRateStore {
         self.exchange_rate_map.insert((currency1, currency2), rate);
     }
 
+    pub fn add_exchange_rate_history(
+        &mut self,
+        currency1: Currency,
+        currency2: Currency,
+        date: Date,
+        rate: f64,
+    ) {
+        let history = self
+            .exchange_rate_history
+            .entry((currency1, currency2))
+            .or_insert(HashMap::new());
+        history.insert(date, rate);
+    }
+
     pub fn reference_date(&self) -> Date {
         self.reference_date
     }
 
-    pub fn get_exchange_rate_map(&self) -> HashMap<(Currency, Currency), f64> {
-        self.exchange_rate_map.clone()
+    pub fn get_exchange_rate_map(&self) -> &HashMap<(Currency, Currency), f64> {
+        &self.exchange_rate_map
+    }
+
+    pub fn get_exchange_rate_map_history(
+        &self,
+    ) -> &HashMap<(Currency, Currency), HashMap<Date, f64>> {
+        &self.exchange_rate_history
     }
 
     pub fn get_exchange_rate(&self, first_ccy: Currency, second_ccy: Currency) -> Result<f64> {
@@ -107,11 +149,67 @@ impl ExchangeRateStore {
         )))
     }
 
+    pub fn get_exchange_rate_history(
+        &self,
+        first_ccy: Currency,
+        second_ccy: Currency,
+        date: Date,
+    ) -> Result<f64> {
+        if date > self.reference_date {
+            return Err(AtlasError::InvalidValueErr(format!(
+                "Date {} is after reference date {} and cannot be used to get exchange rate history",
+                date, self.reference_date
+            )));
+        }
+
+        if date == self.reference_date {
+            return self.get_exchange_rate(first_ccy, second_ccy);
+        }
+
+        let history = self.exchange_rate_history.get(&(first_ccy, second_ccy));
+        if let Some(history) = history {
+            if let Some(rate) = history.get(&date) {
+                return Ok(*rate);
+            } else {
+                return Err(AtlasError::NotFoundErr(format!(
+                    "No exchange rate found between {:?} and {:?} for date {}",
+                    first_ccy, second_ccy, date
+                )));
+            }
+        } else {
+            let history = self.exchange_rate_history.get(&(second_ccy, first_ccy));
+            if let Some(history) = history {
+                if let Some(rate) = history.get(&date) {
+                    if rate == &0.0 {
+                        return Err(AtlasError::InvalidValueErr(format!(
+                            "Inverse exchange rate between {:?} and {:?} for date {} is zero",
+                            second_ccy, first_ccy, date
+                        )));
+                    }
+
+                    return Ok(1.0 / *rate);
+                } else {
+                    return Err(AtlasError::NotFoundErr(format!(
+                        "No exchange rate found between {:?} and {:?} for date {}",
+                        first_ccy, second_ccy, date
+                    )));
+                }
+            }
+            return Err(AtlasError::NotFoundErr(format!(
+                "No exchange rate history found between {:?} and {:?}",
+                first_ccy, second_ccy
+            )));
+        }
+    }
 }
 
 // Implementations of AdvanceExchangeRateStoreInTime for ExchangeRateStore
 impl AdvanceExchangeRateStoreInTime for ExchangeRateStore {
-    fn advance_to_period(&self, period: Period, index_store: &IndexStore) -> Result<ExchangeRateStore> { 
+    fn advance_to_period(
+        &self,
+        period: Period,
+        index_store: &IndexStore,
+    ) -> Result<ExchangeRateStore> {
         let new_date = self.reference_date + period;
         self.advance_to_date(new_date, index_store)
     }
@@ -122,9 +220,11 @@ impl AdvanceExchangeRateStoreInTime for ExchangeRateStore {
                 "Reference date of exchange rate store and index store do not match"
             )));
         }
+        let history = self.exchange_rate_history.clone();
+        let mut new_store = ExchangeRateStore::new(date).with_exchange_rates_history(history);
 
-        let mut new_store = ExchangeRateStore::new(date);
         for ((ccy1, ccy2), fx) in self.exchange_rate_map.iter() {
+            new_store.add_exchange_rate_history(*ccy1, *ccy2, self.reference_date, *fx);
             let compound_factor = index_store.currency_forescast_factor(*ccy1, *ccy2, date);
             match compound_factor {
                 Ok(cf) => new_store.add_exchange_rate(*ccy1, *ccy2, fx * cf),
@@ -132,7 +232,7 @@ impl AdvanceExchangeRateStoreInTime for ExchangeRateStore {
                     // If the compound factor is not available, we use the last fx rate
                     new_store.add_exchange_rate(*ccy1, *ccy2, *fx);
                 }
-            }    
+            }
         }
         Ok(new_store)
     }
@@ -161,6 +261,7 @@ mod tests {
                 map
             },
             exchange_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            exchange_rate_history: HashMap::new(),
         };
 
         assert_eq!(manager.get_exchange_rate(USD, EUR).unwrap(), 0.85);
@@ -182,6 +283,7 @@ mod tests {
             reference_date: ref_date,
             exchange_rate_map: HashMap::new(),
             exchange_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            exchange_rate_history: HashMap::new(),
         };
 
         let result = manager.get_exchange_rate(USD, EUR);
@@ -200,6 +302,7 @@ mod tests {
                 map
             },
             exchange_rate_cache: Arc::new(Mutex::new(HashMap::new())),
+            exchange_rate_history: HashMap::new(),
         };
 
         assert_eq!(manager.get_exchange_rate(EUR, USD).unwrap(), 1.0 / 0.85);
@@ -278,5 +381,77 @@ mod tests {
         let mut map2 = map.clone();
         map2.insert((USD, EUR), 0.5);
         assert_eq!(manager.get_exchange_rate(USD, EUR).unwrap(), 0.8);
+    }
+
+    #[test]
+    fn test_get_exchange_rate_history() {
+        let ref_date = Date::new(2021, 1, 1);
+        let mut manager = ExchangeRateStore::new(ref_date);
+        manager.add_exchange_rate(USD, EUR, 0.8);
+        manager.add_exchange_rate_history(USD, EUR, ref_date - 1, 0.9);
+        let history1 = manager
+            .get_exchange_rate_history(USD, EUR, ref_date)
+            .unwrap();
+        let history2 = manager
+            .get_exchange_rate_history(USD, EUR, ref_date - 1)
+            .unwrap();
+        assert_eq!(history1, 0.8);
+        assert_eq!(history2, 0.9);
+    }
+
+    #[test]
+    fn test_get_exchange_rate_history_inverse() {
+        let ref_date = Date::new(2021, 1, 1);
+        let mut manager = ExchangeRateStore::new(ref_date);
+        manager.add_exchange_rate(USD, EUR, 0.8);
+        manager.add_exchange_rate_history(USD, EUR, ref_date - 1, 0.9);
+        let history1 = manager
+            .get_exchange_rate_history(EUR, USD, ref_date)
+            .unwrap();
+        let history2 = manager
+            .get_exchange_rate_history(EUR, USD, ref_date - 1)
+            .unwrap();
+        assert_eq!(history1, 1.0 / 0.8);
+        assert_eq!(history2, 1.0 / 0.9);
+    }
+
+    #[test]
+    fn history_inserts_on_reference_date() {
+        let ref_date = Date::new(2024, 1, 1);
+        let mut manager = ExchangeRateStore::new(ref_date);
+        manager.add_exchange_rate(Currency::USD, Currency::CLP, 900.0);
+        let index_store = IndexStore::new(ref_date);
+
+        let manager = manager.advance_to_date(ref_date + 1, &index_store).unwrap();
+
+        let history = manager
+            .get_exchange_rate_history(Currency::USD, Currency::CLP, ref_date)
+            .unwrap();
+        assert_eq!(history, 900.0);
+
+        let history = manager
+            .get_exchange_rate_history(Currency::USD, Currency::CLP, ref_date + 1)
+            .unwrap();
+        assert_eq!(history, 900.0);
+    }
+
+    #[test]
+    fn history_inserts_on_reference_date_inverse() {
+        let ref_date = Date::new(2024, 1, 1);
+        let mut manager = ExchangeRateStore::new(ref_date);
+        manager.add_exchange_rate(Currency::USD, Currency::CLP, 900.0);
+        let index_store = IndexStore::new(ref_date);
+
+        let manager = manager.advance_to_date(ref_date + 1, &index_store).unwrap();
+
+        let history = manager
+            .get_exchange_rate_history(Currency::CLP, Currency::USD, ref_date)
+            .unwrap();
+        assert_eq!(history, 1.0 / 900.0);
+
+        let history = manager
+            .get_exchange_rate_history(Currency::CLP, Currency::USD, ref_date + 1)
+            .unwrap();
+        assert_eq!(history, 1.0 / 900.0);
     }
 }

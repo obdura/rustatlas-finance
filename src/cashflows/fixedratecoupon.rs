@@ -3,12 +3,14 @@ use std::collections::BTreeMap;
 use super::side::Side;
 use super::simplecashflow::SimpleCashflow;
 use super::traits::{Expires, InterestAccrual, Payable, Scalable};
+use crate::core::meta::{DiscountFactorRequest, ExchangeRateRequest, ForwardRateRequest};
 use crate::core::traits::{HasCurrency, HasDiscountCurveId, HasForecastCurveId};
+use crate::currencies::exchangerategeneration::{ExchangeGenerationMethod, SingleDate};
 use crate::time::enums::TimeUnit;
 use crate::time::period::Period;
 use crate::utils::errors::AtlasError;
 use crate::{
-    core::{meta::MarketRequest, traits::Registrable},
+    core::traits::Registrable,
     currencies::enums::Currency,
     rates::interestrate::InterestRate,
     time::date::Date,
@@ -27,7 +29,7 @@ use serde::{Deserialize, Serialize};
 /// * `payment_date` - The date on which the coupon is paid
 /// * `currency` - The currency of the coupon
 /// * `side` - The side of the coupon (Pay or Receive)
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FixedRateCoupon {
     notional: f64,
     rate: InterestRate,
@@ -99,13 +101,35 @@ impl FixedRateCoupon {
         self.rate
     }
 
-    pub fn with_exchange_fixing_date(&mut self, date: Date) -> &mut FixedRateCoupon {
-        self.cashflow.with_exchange_fixing_date(date);
+    pub fn cashflow(&self) -> &SimpleCashflow {
+        &self.cashflow
+    }
+
+    pub fn cashflow_mut(&mut self) -> &mut SimpleCashflow {
+        &mut self.cashflow
+    }
+
+    pub fn with_exchange_fixing_method(
+        &mut self,
+        method: ExchangeGenerationMethod,
+    ) -> &mut FixedRateCoupon {
+        self.cashflow_mut().set_exchange_fixing_method(method);
         self
     }
 
+    pub fn with_exchange_fixing_date(&mut self, date: Date) -> &mut FixedRateCoupon {
+        let method = ExchangeGenerationMethod::SingleDate(SingleDate::new(date));
+        self.cashflow_mut().set_exchange_fixing_method(method);
+        self
+    }
+
+    pub fn set_exchange_fixing_method(&mut self, method: ExchangeGenerationMethod) {
+        self.cashflow_mut().set_exchange_fixing_method(method);
+    }
+
     pub fn set_exchange_fixing_date(&mut self, date: Date) {
-        self.cashflow.set_exchange_fixing_date(date);
+        let method = ExchangeGenerationMethod::SingleDate(SingleDate::new(date));
+        self.cashflow.set_exchange_fixing_method(method);
     }
 
     pub fn with_payment_currency(&mut self, currency: Currency) -> &mut FixedRateCoupon {
@@ -147,8 +171,24 @@ impl Registrable for FixedRateCoupon {
         self.cashflow.set_id(id);
     }
 
-    fn market_request(&self) -> Result<MarketRequest> {
-        return self.cashflow.market_request();
+    fn df_request(&self) -> Result<Option<DiscountFactorRequest>> {
+        self.cashflow.df_request()
+    }
+
+    fn fwd_request(&self) -> Result<Option<ForwardRateRequest>> {
+        self.cashflow.fwd_request()
+    }
+
+    fn fx_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        self.cashflow.fx_request()
+    }
+
+    fn fx_fwd_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        self.cashflow.fx_fwd_request()
+    }
+
+    fn fx_fixing_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        self.cashflow.fx_fixing_request()
     }
 }
 
@@ -200,8 +240,8 @@ impl Payable for FixedRateCoupon {
     fn payment_currency(&self) -> Result<Currency> {
         return self.cashflow.payment_currency();
     }
-    fn exchange_fixing_date(&self) -> Result<Date> {
-        return self.cashflow.exchange_fixing_date();
+    fn exchange_fixing_method(&self) -> Result<&Option<ExchangeGenerationMethod>> {
+        return self.cashflow.exchange_fixing_method();
     }
 }
 
@@ -428,8 +468,8 @@ mod tests {
         let new_notional = 800.0;
         coupon.set_notional(new_notional);
 
-        let expected_amount = new_notional
-            * (rate.compound_factor(accrual_start_date, accrual_end_date) - 1.0);
+        let expected_amount =
+            new_notional * (rate.compound_factor(accrual_start_date, accrual_end_date) - 1.0);
 
         assert!((coupon.amount().unwrap() - expected_amount).abs() < 1e-10);
     }
@@ -464,7 +504,12 @@ mod tests {
         coupon.set_exchange_fixing_date(fixing_date);
         coupon.set_payment_currency(payment_currency);
 
-        assert_eq!(coupon.exchange_fixing_date().unwrap(), fixing_date);
+        assert_eq!(
+            coupon.exchange_fixing_method().unwrap(),
+            &Some(ExchangeGenerationMethod::SingleDate(SingleDate::new(
+                fixing_date
+            )))
+        );
         assert_eq!(coupon.payment_currency().unwrap(), payment_currency);
     }
 

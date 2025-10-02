@@ -7,13 +7,11 @@ use rayon::{
     slice::ParallelSliceMut,
 };
 use rustatlas::{
-    cashflows::side::Side, currencies::enums::Currency, instruments::{constructors::makefixedrateinstrument::MakeFixedRateInstrument, loandepos::fixedrateinstrument::FixedRateInstrument}, models::{simplemodel::SimpleModel, traits::Model}, rates::{enums::Compounding, interestrate::InterestRate, traits::HasReferenceDate}, time::{
+    cashflows::side::Side, currencies::enums::Currency, instruments::{constructors::makefixedrateinstrument::MakeFixedRateInstrument, loandepos::fixedrateinstrument::FixedRateInstrument}, models::simplemodel::SimpleModel, rates::{enums::Compounding, interestrate::InterestRate, traits::HasReferenceDate}, time::{
         daycounter::DayCounter,
         enums::{Frequency, TimeUnit},
         period::Period,
-    }, visitors::{
-        indexingvisitors::indexingvisitor::IndexingVisitor, traits::{ConstVisit, Visit}
-    }
+    }, visitors::traits::ConstVisit
 };
 
 mod common;
@@ -57,15 +55,10 @@ fn multiple() {
     fn npv(instruments: &mut [FixedRateInstrument]) -> f64 {
         let store = Arc::new(create_store().unwrap());
         let mut npv = 0.0;
-        let indexer = IndexingVisitor::new();
-        instruments
-            .iter_mut()
-            .for_each(|inst| indexer.visit(inst).unwrap());
 
         let model = SimpleModel::new(&store);
-        let data = model.gen_market_data(&indexer.request()).unwrap();
 
-        let npv_visitor = rustatlas::visitors::npvvisitors::npvconstvisitor::NPVConstVisitor::new(&data, true);
+        let npv_visitor = rustatlas::visitors::npvvisitors::npvconstvisitor::NPVConstVisitor::new(&model, true);
         instruments
             .iter()
             .for_each(|inst| npv += npv_visitor.visit(inst).unwrap());

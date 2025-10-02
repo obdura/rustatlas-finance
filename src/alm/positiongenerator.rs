@@ -12,12 +12,12 @@ use crate::{
         loandepos::instrument::Instrument,
         traits::{RateType, Structure},
     },
-    models::{simplemodel::SimpleModel, traits::Model},
+    models::simplemodel::SimpleModel,
     rates::{interestrate::RateDefinition, traits::HasReferenceDate},
     time::{enums::Frequency, period::Period},
     utils::errors::{AtlasError, Result},
     visitors::{
-        indexingvisitors::indexingvisitor::IndexingVisitor, parvaluevisitors::traits::ParValueConstVisitor, traits::{ConstVisit, Visit}
+        parvaluevisitors::traits::ParValueConstVisitor, traits::ConstVisit
     },
 };
 
@@ -148,29 +148,21 @@ impl<'a> PositionGenerator<'a> {
 
     fn calculate_par_spread(&self, builder: MakeFloatingRateInstrument) -> Result<f64> {
         let mut instrument = builder.with_spread(0.01).build()?;
-        let indexing_visitor = IndexingVisitor::new();
-        let _ = indexing_visitor.visit(&mut instrument);
         let market_store = self.market_store.clone().ok_or(AtlasError::ValueNotSetErr(
             "Market store not set for loan generator".into(),
         ))?;
         let model = SimpleModel::new(market_store);
-        let data = model.gen_market_data(&indexing_visitor.request())?;
-        let par_visitor = ParValueConstVisitor::new(&data);
+        let par_visitor = ParValueConstVisitor::new(&model);
         Ok(par_visitor.visit(&mut instrument)?)
     }
 
     fn calculate_par_rate(&self, builder: MakeFixedRateInstrument) -> Result<f64> {
         let mut instrument = builder.with_rate_value(0.03).build()?;
-        let indexing_visitor = IndexingVisitor::new();
-        let _ = indexing_visitor.visit(&mut instrument);
         let market_store = self.market_store.clone().ok_or(AtlasError::ValueNotSetErr(
             "Market store not set for loan generator".into(),
         ))?;
         let model = SimpleModel::new(market_store);
-
-        let data = model.gen_market_data(&indexing_visitor.request())?;
-
-        let par_visitor = ParValueConstVisitor::new(&data);
+        let par_visitor = ParValueConstVisitor::new(&model);
         Ok(par_visitor.visit(&mut instrument)?)
     }
 

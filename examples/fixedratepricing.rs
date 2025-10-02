@@ -4,14 +4,20 @@ use rustatlas::{
     cashflows::{
         side::Side,
         traits::{InterestAccrual, Payable},
-    }, currencies::enums::Currency, instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument, models::{simplemodel::SimpleModel, traits::Model}, rates::{enums::Compounding, interestrate::InterestRate, traits::HasReferenceDate}, time::{
+    },
+    currencies::enums::Currency,
+    instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument,
+    models::simplemodel::SimpleModel,
+    rates::{enums::Compounding, interestrate::InterestRate, traits::HasReferenceDate},
+    time::{
         date::Date,
         daycounter::DayCounter,
         enums::{Frequency, TimeUnit},
         period::Period,
-    }, visitors::{
-        indexingvisitors::indexingvisitor::IndexingVisitor, npvvisitors::npvconstvisitor::NPVConstVisitor, parvaluevisitors::traits::ParValueConstVisitor, traits::{ConstVisit, HasCashflows, Visit}
-    }
+    },
+    visitors::{
+        npvvisitors::npvconstvisitor::NPVConstVisitor, parvaluevisitors::traits::ParValueConstVisitor, traits::{ConstVisit, HasCashflows}
+    },
 };
 
 mod common;
@@ -32,7 +38,7 @@ fn starting_today_pricing() {
         DayCounter::Actual360,
     );
 
-    let mut instrument = MakeFixedRateInstrument::new()
+    let instrument = MakeFixedRateInstrument::new()
         .with_start_date(start_date)
         .with_end_date(end_date)
         .with_rate(rate)
@@ -45,20 +51,12 @@ fn starting_today_pricing() {
         .build()
         .unwrap();
 
-    let indexer = IndexingVisitor::new();
-    let result = indexer.visit(&mut instrument);
-    match result {
-        Ok(_) => (),
-        Err(e) => panic!("IndexingVisitor failed with error: {}", e),
-    }
 
     let ref_date = market_store.reference_date();
     let model = SimpleModel::new(&market_store);
 
-    let data = model.gen_market_data(&indexer.request()).unwrap();
-    print_table(instrument.cashflows_as_vec(), &data);
 
-    let npv_visitor = NPVConstVisitor::new(&data, true);
+    let npv_visitor = NPVConstVisitor::new(&model, true);
     let npv = npv_visitor.visit(&instrument);
 
     print_separator();
@@ -88,7 +86,7 @@ fn starting_today_pricing() {
         start_accrual, end_accrual, maturing_amount
     );
 
-    let par_visitor = ParValueConstVisitor::new(&data);
+    let par_visitor = ParValueConstVisitor::new(&model);
     let par_value = par_visitor.visit(&instrument).unwrap();
     println!("Par Value: {}", par_value);
 }
@@ -110,7 +108,7 @@ fn forward_starting_pricing() {
         DayCounter::Actual360,
     );
 
-    let mut instrument = MakeFixedRateInstrument::new()
+    let instrument = MakeFixedRateInstrument::new()
         .with_start_date(start_date)
         .with_end_date(end_date)
         .with_rate(rate)
@@ -123,15 +121,11 @@ fn forward_starting_pricing() {
         .build()
         .unwrap();
 
-    let indexer = IndexingVisitor::new();
-    let _ = indexer.visit(&mut instrument);
+
 
     let model = SimpleModel::new(&market_store);
 
-    let data = model.gen_market_data(&indexer.request()).unwrap();
-    print_table(instrument.cashflows_as_vec(), &data);
-
-    let npv_visitor = NPVConstVisitor::new(&data, true);
+    let npv_visitor = NPVConstVisitor::new(&model, true);
     let npv = npv_visitor.visit(&instrument);
 
     print_separator();
@@ -164,7 +158,7 @@ fn already_started_pricing() {
         DayCounter::Actual360,
     );
 
-    let mut instrument = MakeFixedRateInstrument::new()
+    let instrument = MakeFixedRateInstrument::new()
         .with_start_date(start_date)
         .with_end_date(end_date)
         .with_rate(rate)
@@ -177,19 +171,12 @@ fn already_started_pricing() {
         .build()
         .unwrap();
 
-    let indexer = IndexingVisitor::new();
-    let result = indexer.visit(&mut instrument);
-    match result {
-        Ok(_) => (),
-        Err(e) => panic!("IndexingVisitor failed with error: {}", e),
-    }
+
 
     let model = SimpleModel::new(&market_store);
 
-    let data = model.gen_market_data(&indexer.request()).unwrap();
-    print_table(instrument.cashflows_as_vec(), &data);
 
-    let npv_visitor = NPVConstVisitor::new(&data, true);
+    let npv_visitor = NPVConstVisitor::new(&model, true);
     let npv = npv_visitor.visit(&instrument);
 
     print_separator();
@@ -205,7 +192,7 @@ fn already_started_pricing() {
         start_accrual, end_accrual, accrued_amount
     );
 
-    let par_visitor = ParValueConstVisitor::new(&data);
+    let par_visitor = ParValueConstVisitor::new(&model);
     let par_value = par_visitor.visit(&instrument).unwrap();
     println!("Par Value: {}", par_value);
 }

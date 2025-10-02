@@ -10,10 +10,7 @@ use crate::{
     math::solver::{brentroot::BrentRoot, traits::CostFunction},
     rates::interestrate::InterestRate,
     utils::errors::Result,
-    visitors::{
-        npvvisitors::npvconstvisitor::NPVConstVisitor,
-        traits::{ConstVisit, Visit},
-    },
+    visitors::{npvvisitors::npvconstvisitor::NPVConstVisitor, traits::{ConstVisit, Visit}},
 };
 
 use super::traits::{ParValue, ParValueConstVisitor};
@@ -95,10 +92,10 @@ impl<'a> ConstVisit<FixedRateInstrument> for ParValueConstVisitor<'a> {
             _ => (-1.0, 1.0),
         };
 
-        let mut cost = ParValue::new(instrument, &self.market_data);
+        let mut cost = ParValue::new(instrument, self.model);
         cost.set_target_cost(self.target_cost.unwrap_or(0.0));
 
-        let solver = BrentRoot::new(cost, min, max);
+        let solver = BrentRoot::new(cost, min, max).with_tolerance(1e-6);
         let res = solver.solve()?;
         Ok(res.root)
     }
@@ -112,7 +109,7 @@ impl<'a> ConstVisit<FloatingRateInstrument> for ParValueConstVisitor<'a> {
     fn visit(&self, instrument: &FloatingRateInstrument) -> Self::Output {
         let (min, max) = (-1.0, 1.0);
 
-        let mut cost = ParValue::new(instrument, &self.market_data);
+        let mut cost = ParValue::new(instrument, self.model);
         cost.set_target_cost(self.target_cost.unwrap_or(0.0));
 
         let solver = BrentRoot::new(cost, min, max);
@@ -130,7 +127,7 @@ impl<'a> ConstVisit<Leg> for ParValueConstVisitor<'a> {
     fn visit(&self, instrument: &Leg) -> Self::Output {
         let (min, max) = (-1.0, 1.0);
 
-        let mut cost = ParValue::new(instrument, &self.market_data);
+        let mut cost = ParValue::new(instrument, self.model);
         cost.set_target_cost(self.target_cost.unwrap_or(0.0));
 
         let solver = BrentRoot::new(cost, min, max);
@@ -147,14 +144,14 @@ impl<'a> ConstVisit<VanillaIRSSwap> for ParValueConstVisitor<'a> {
         let first_leg = instrument.first_leg();
         let second_leg = instrument.second_leg();
 
-        let nvp_visitor = NPVConstVisitor::new(&self.market_data, true);
+        let nvp_visitor = NPVConstVisitor::new(self.model, true);
         let nvp_first_leg = nvp_visitor.visit(first_leg)?;
 
         let target_cost = self.target_cost.unwrap_or(0.0) - nvp_first_leg;
 
         let (min, max) = (-1.0, 1.0);
 
-        let mut cost = ParValue::new(second_leg, &self.market_data);
+        let mut cost = ParValue::new(second_leg, self.model);
         cost.set_target_cost(target_cost);
 
         let solver = BrentRoot::new(cost, min, max);
@@ -170,7 +167,7 @@ impl<'a> ConstVisit<CrossCurrencySwap> for ParValueConstVisitor<'a> {
     fn visit(&self, instrument: &CrossCurrencySwap) -> Self::Output {
         let first_leg = instrument.first_leg();
         let second_leg = instrument.second_leg();
-        let mut nvp_visitor = NPVConstVisitor::new(&self.market_data, true);
+        let mut nvp_visitor = NPVConstVisitor::new(self.model, true);
         nvp_visitor.set_in_local_currency(true);
 
         let nvp_first_leg = nvp_visitor.visit(first_leg)?;
@@ -179,7 +176,7 @@ impl<'a> ConstVisit<CrossCurrencySwap> for ParValueConstVisitor<'a> {
 
         let (min, max) = (-1.0, 1.0);
 
-        let mut cost = ParValue::new_with_local_currency_npv(second_leg, &self.market_data);
+        let mut cost = ParValue::new_with_local_currency_npv(second_leg, self.model);
         cost.set_target_cost(target_cost);
 
         let solver = BrentRoot::new(cost, min, max);
@@ -190,12 +187,10 @@ impl<'a> ConstVisit<CrossCurrencySwap> for ParValueConstVisitor<'a> {
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::HashMap,
-        sync::{Arc, RwLock},
+        collections::HashMap, sync::{Arc, RwLock}
     };
 
     use super::*;
-    use crate::visitors::indexingvisitors::fixingvisitor::FixingVisitor;
     use crate::{
         cashflows::side::Side,
         core::marketstore::MarketStore,
@@ -204,7 +199,7 @@ mod tests {
             makefixedrateinstrument::MakeFixedRateInstrument,
             makefloatingrateinstrument::MakeFloatingRateInstrument,
         },
-        models::{simplemodel::SimpleModel, traits::Model},
+        models::simplemodel::SimpleModel,
         rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
@@ -217,8 +212,7 @@ mod tests {
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        },
-        visitors::indexingvisitors::indexingvisitor::IndexingVisitor,
+        }, visitors::fixingvisitor::fixingvisitor::FixingVisitor,
     };
     use crate::{
         instruments::{
@@ -324,7 +318,7 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let mut instrument = MakeFixedRateInstrument::new()
+        let instrument = MakeFixedRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate(rate)
@@ -336,13 +330,9 @@ mod tests {
             .equal_payments()
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
 
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
-
-        let parvaluevisitor = ParValueConstVisitor::new(&data);
+        let parvaluevisitor = ParValueConstVisitor::new(&model);
         let par_value = parvaluevisitor.visit(&instrument)?;
 
         assert!((par_value - 0.05).abs() < 1e-6);
@@ -364,7 +354,7 @@ mod tests {
             Frequency::Annual,
             DayCounter::Thirty360,
         );
-        let mut instrument = MakeFixedRateInstrument::new()
+        let instrument = MakeFixedRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate(rate)
@@ -375,14 +365,12 @@ mod tests {
             .with_notional(notional)
             .bullet()
             .build()?;
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
 
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let parvaluevisitor = ParValueConstVisitor::new(&data);
+        let parvaluevisitor = ParValueConstVisitor::new(&model);
         let par_value = parvaluevisitor.visit(&instrument)?;
+        println!("Par Value: {}", par_value);
 
         assert!((par_value - 0.05).abs() < 1e-6);
 
@@ -404,7 +392,7 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let mut instrument = MakeFixedRateInstrument::new()
+        let instrument = MakeFixedRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate(rate)
@@ -415,13 +403,10 @@ mod tests {
             .with_notional(notional)
             .bullet()
             .build()?;
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
 
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let parvaluevisitor = ParValueConstVisitor::new(&data);
+        let parvaluevisitor = ParValueConstVisitor::new(&model);
         let par_value = parvaluevisitor.visit(&instrument)?;
 
         assert!((par_value - 0.05).abs() < 1e-6);
@@ -445,7 +430,7 @@ mod tests {
 
         let spread = 0.04;
 
-        let mut instrument = MakeFloatingRateInstrument::new()
+        let instrument = MakeFloatingRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_rate_definition(rate_definition)
@@ -459,13 +444,10 @@ mod tests {
             .bullet()
             .build()?;
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut instrument)?;
 
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let parvaluevisitor = ParValueConstVisitor::new(&data);
+        let parvaluevisitor = ParValueConstVisitor::new(&model);
         let par_value = parvaluevisitor.visit(&instrument)?;
 
         assert!((par_value - 0.03).abs() < 1e-6);
@@ -516,15 +498,11 @@ mod tests {
             .build()
             .unwrap();
 
-        let mut vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg, Currency::USD)?;
-
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut vanillairsswap)?;
+        let vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg, Currency::USD)?;
 
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let par_value_visitor = ParValueConstVisitor::new(&data);
+        let par_value_visitor = ParValueConstVisitor::new(&model);
 
         let par_rate = par_value_visitor.visit(&vanillairsswap)?;
 
@@ -578,20 +556,11 @@ mod tests {
             .unwrap();
 
         let mut vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg, Currency::USD)?;
-
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut vanillairsswap)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
-
-        let fixing_visitor = FixingVisitor::new(&data);
+        let fixing_visitor = FixingVisitor::new(&model);
         let _ = fixing_visitor.visit(&mut vanillairsswap);
-
-        let npv_visitor = NPVConstVisitor::new(&data, true);
-
+        let npv_visitor = NPVConstVisitor::new(&model, true);
         let swap_npv = npv_visitor.visit(&vanillairsswap)?;
-
         println!("NPV for vanilla IRS swap: {}", swap_npv);
 
         // El NPV debería ser diferente de cero ya que la tasa fija (5%)
@@ -616,7 +585,7 @@ mod tests {
         let rate = InterestRate::from_rate_definition(0.05, rate_definition);
         let notional = 100.0;
 
-        let mut fix_leg = MakeFixedRateLeg::new()
+        let fix_leg = MakeFixedRateLeg::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_notional(notional)
@@ -629,13 +598,8 @@ mod tests {
             .build()
             .unwrap();
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut fix_leg)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
-
-        let par_value_visitor = ParValueConstVisitor::new(&data);
+        let par_value_visitor = ParValueConstVisitor::new(&model);
 
         let par_rate = par_value_visitor.visit(&fix_leg)?;
 
@@ -659,7 +623,7 @@ mod tests {
         );
         let notional = 100.0;
 
-        let mut float_leg = MakeFloatingRateLeg::new()
+        let float_leg = MakeFloatingRateLeg::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_payment_frequency(Frequency::Quarterly)
@@ -674,14 +638,9 @@ mod tests {
             .build()
             .unwrap();
 
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut float_leg)?;
-
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let par_value_visitor = ParValueConstVisitor::new(&data);
-
+        let par_value_visitor = ParValueConstVisitor::new(&model);
         let par_spread = par_value_visitor.visit(&float_leg)?;
 
         assert!(par_spread > -1.0 && par_spread < 1.0);
@@ -732,21 +691,11 @@ mod tests {
             .build()
             .unwrap();
 
-        let mut cross_currency_swap = CrossCurrencySwap::new(fix_leg, float_leg, Currency::USD)?;
-
-        let indexer = IndexingVisitor::new();
-        indexer.visit(&mut cross_currency_swap)?;
-
+        let cross_currency_swap = CrossCurrencySwap::new(fix_leg, float_leg, Currency::USD)?;
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
-
-        let par_value_visitor = ParValueConstVisitor::new(&data);
-
+        let par_value_visitor = ParValueConstVisitor::new(&model);
         let par_rate = par_value_visitor.visit(&cross_currency_swap)?;
-
         assert!(par_rate > -1.0 && par_rate < 1.0);
-
         Ok(())
     }
-
 }

@@ -4,10 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{
-        meta::{ForwardRateRequest, MarketRequest},
+        meta::{DiscountFactorRequest, ExchangeRateRequest, ForwardRateRequest},
         traits::{HasCurrency, HasDiscountCurveId, HasForecastCurveId, Registrable},
     },
-    currencies::enums::Currency,
+    currencies::{
+        enums::Currency,
+        exchangerategeneration::{ExchangeGenerationMethod, SingleDate},
+    },
     rates::interestrate::{InterestRate, RateDefinition},
     time::{date::Date, enums::TimeUnit, period::Period},
     utils::errors::{AtlasError, Result},
@@ -34,7 +37,7 @@ use super::{
 /// * `forecast_curve_id` - The ID of the forecast curve used to calculate the present value of the coupon
 /// * `currency` - The currency of the coupon
 /// * `side` - The side of the coupon (Pay or Receive)
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FloatingRateCoupon {
     notional: f64,
     spread: f64,
@@ -137,9 +140,35 @@ impl FloatingRateCoupon {
         self.fixing_rate
     }
 
-    pub fn with_exchange_fixing_date(&mut self, date: Date) -> &mut FloatingRateCoupon {
-        self.cashflow.with_exchange_fixing_date(date);
+    pub fn cashflow(&self) -> &SimpleCashflow {
+        &self.cashflow
+    }
+
+    pub fn cashflow_mut(&mut self) -> &mut SimpleCashflow {
+        &mut self.cashflow
+    }
+
+    pub fn with_exchange_fixing_method(
+        &mut self,
+        method: ExchangeGenerationMethod,
+    ) -> &mut FloatingRateCoupon {
+        self.cashflow_mut().set_exchange_fixing_method(method);
         self
+    }
+
+    pub fn with_exchange_fixing_date(&mut self, date: Date) -> &mut FloatingRateCoupon {
+        let method = ExchangeGenerationMethod::SingleDate(SingleDate::new(date));
+        self.cashflow_mut().set_exchange_fixing_method(method);
+        self
+    }
+
+    pub fn set_exchange_fixing_method(&mut self, method: ExchangeGenerationMethod) {
+        self.cashflow.set_exchange_fixing_method(method);
+    }
+
+    pub fn set_exchange_fixing_date(&mut self, date: Date) {
+        let method = ExchangeGenerationMethod::SingleDate(SingleDate::new(date));
+        self.cashflow.set_exchange_fixing_method(method);
     }
 
     pub fn with_payment_currency(&mut self, currency: Currency) -> &mut FloatingRateCoupon {
@@ -147,12 +176,35 @@ impl FloatingRateCoupon {
         self
     }
 
-    pub fn set_exchange_fixing_date(&mut self, date: Date) {
-        self.cashflow.set_exchange_fixing_date(date);
-    }
-
     pub fn set_payment_currency(&mut self, currency: Currency) {
         self.cashflow.set_payment_currency(currency);
+    }
+
+    pub fn fixing_request(&self) -> Result<ForwardRateRequest> {
+        let forecast_curve_id = self.forecast_curve_id()?;
+
+        let fixing_start_date = self.fixing_start_date()?.ok_or(AtlasError::ValueNotSetErr(
+            "Fixing start date not set".to_string(),
+        ))?;
+        let fixing_end_date = self.fixing_end_date()?.ok_or(AtlasError::ValueNotSetErr(
+            "Fixing end date not set".to_string(),
+        ))?;
+
+        if self.fixing_start_date()? >= self.fixing_end_date()? {
+            return Err(AtlasError::InvalidValueErr(format!(
+                "Fixing start date {} is after or equal to fixing end date {}",
+                fixing_start_date, fixing_end_date
+            )));
+        }
+
+        let forecast = ForwardRateRequest::new(
+            forecast_curve_id,
+            fixing_start_date,
+            fixing_end_date,
+            self.rate_definition.compounding(),
+            self.rate_definition.frequency(),
+        );
+        Ok(forecast)
     }
 }
 
@@ -200,7 +252,7 @@ impl RequiresFixingRate for FloatingRateCoupon {
             .accrued_amount(self.accrual_start_date, self.accrual_end_date)
             .unwrap()
             * self.side().sign();
-        self.cashflow = self.cashflow.with_amount(accrual);
+        self.cashflow_mut().set_amount(accrual);
     }
 
     fn fixing_start_date(&self) -> Result<Option<Date>> {
@@ -227,8 +279,8 @@ impl Payable for FloatingRateCoupon {
     fn payment_currency(&self) -> Result<Currency> {
         return self.cashflow.payment_currency();
     }
-    fn exchange_fixing_date(&self) -> Result<Date> {
-        return self.cashflow.exchange_fixing_date();
+    fn exchange_fixing_method(&self) -> Result<&Option<ExchangeGenerationMethod>> {
+        return self.cashflow.exchange_fixing_method();
     }
 }
 
@@ -260,38 +312,24 @@ impl Registrable for FloatingRateCoupon {
         self.cashflow.set_id(id);
     }
 
-    fn market_request(&self) -> Result<MarketRequest> {
-        let tmp = self.cashflow.market_request()?;
-        let forecast_curve_id = self.forecast_curve_id()?;
-
-        let fixing_start_date = self.fixing_start_date()?.ok_or(AtlasError::ValueNotSetErr(
-            "Fixing start date not set".to_string(),
-        ))?;
-        let fixing_end_date = self.fixing_end_date()?.ok_or(AtlasError::ValueNotSetErr(
-            "Fixing end date not set".to_string(),
-        ))?;
-
-        if self.fixing_start_date()? >= self.fixing_end_date()? {
-            return Err(AtlasError::InvalidValueErr(format!(
-                "Fixing start date {} is after or equal to fixing end date {}",
-                fixing_start_date, fixing_end_date
-            )));
-        }
-
-        let forecast = ForwardRateRequest::new(
-            forecast_curve_id,
-            fixing_start_date,
-            fixing_end_date,
-            self.rate_definition.compounding(),
-            self.rate_definition.frequency(),
-        );
-        Ok(MarketRequest::new(
-            tmp.id(),
-            tmp.df(),
-            Some(forecast),
-            tmp.fx(),
-            tmp.fx_fwd(),
-        ))
+    fn df_request(&self) -> Result<Option<DiscountFactorRequest>> {
+        self.cashflow.df_request()
+    }
+    
+    fn fwd_request(&self) -> Result<Option<ForwardRateRequest>> {
+        Ok(Some(self.fixing_request()?))
+    }
+    
+    fn fx_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        self.cashflow.fx_request()
+    }
+    
+    fn fx_fwd_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        self.cashflow.fx_fwd_request()
+    }
+    
+    fn fx_fixing_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        Ok(None)
     }
 }
 

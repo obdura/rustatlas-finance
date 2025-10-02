@@ -6,9 +6,12 @@ use std::{
 use crate::{
     core::{
         marketstore::MarketStore,
-        meta::{DiscountFactorRequest, ExchangeRateRequest, ForwardRateRequest, MarketRequest},
+        meta::{DiscountFactorRequest, ExchangeRateRequest, ForwardRateRequest},
     },
-    currencies::{enums::Currency, exchangeratestore::ExchangeRateStore},
+    currencies::{
+        enums::Currency, exchangerategeneration::ExchangeGenerationMethod,
+        exchangeratestore::ExchangeRateStore,
+    },
     math::interpolation::enums::Interpolator,
     models::traits::Model,
     rates::{
@@ -668,11 +671,31 @@ fn implied_rate(
 #[derive(Clone)]
 pub struct BootstrappingModel<'a> {
     market_store: &'a BootstrappingMarketStore,
+    discount_factors_cache: Arc<RwLock<HashMap<DiscountFactorRequest, f64>>>,
+    forward_rates_cache: Arc<RwLock<HashMap<ForwardRateRequest, f64>>>,
+    fx_cache: Arc<RwLock<HashMap<ExchangeRateRequest, f64>>>,
 }
 
 impl<'a> BootstrappingModel<'a> {
     pub fn new(market_store: &'a BootstrappingMarketStore) -> BootstrappingModel<'a> {
-        BootstrappingModel { market_store }
+        BootstrappingModel {
+            market_store,
+            discount_factors_cache: Arc::new(RwLock::new(HashMap::new())),
+            forward_rates_cache: Arc::new(RwLock::new(HashMap::new())),
+            fx_cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub fn clear_cache(&self) {
+        if let Ok(mut cache) = self.discount_factors_cache.write() {
+            cache.clear();
+        }
+        if let Ok(mut cache) = self.forward_rates_cache.write() {
+            cache.clear();
+        }
+        if let Ok(mut cache) = self.fx_cache.write() {
+            cache.clear();
+        }
     }
 }
 
@@ -681,101 +704,164 @@ impl<'a> Model for BootstrappingModel<'a> {
         self.market_store.reference_date()
     }
 
-    fn gen_df_data(&self, df_request: DiscountFactorRequest) -> Result<f64> {
+    fn gen_df_data(&self, df_request: &DiscountFactorRequest) -> Result<f64> {
+        // 1.- Check cache and return if hit
+        if let Some(hit) = {
+            self.discount_factors_cache
+                .read()
+                .map_err(|_| AtlasError::PoisonedCacheErr("discount_factors_cache".to_string()))?
+                .get(df_request)
+                .copied()
+        } {
+            return Ok(hit);
+        }
+
+        // 2.- no cache hit, gen data
         let date = df_request.date();
         let ref_date = self.market_store.reference_date();
 
-        // eval today or before ref date
-        if ref_date > date {
-            return Ok(0.0);
+        let computed = if ref_date > date {
+            0.0
         } else if ref_date == date {
-            return Ok(1.0);
-        }
-
-        let id = df_request.provider_id();
-        let curve = self
-            .market_store
-            .curves_map()
-            .get(&id)
-            .ok_or(AtlasError::BootstrappingErr(format!(
-                "Curve with id {} not found in bootstrapping market store",
-                id
-            )))?;
-
-        let df = curve.discount_factor(date)?;
-
-        let currency_forescast_factor = match df_request.discount_currency() {
-            Some(currency) => {
+            1.0
+        } else {
+            let id = df_request.provider_id();
+            let curve =
                 self.market_store
-                    .currency_forescast_factor(curve.currency(), currency, date)?
-            }
-            None => 1.0,
-        };
+                    .curves_map()
+                    .get(&id)
+                    .ok_or(AtlasError::BootstrappingErr(format!(
+                        "Curve with id {} not found in bootstrapping market store",
+                        id
+                    )))?;
+            let df = curve.discount_factor(date)?;
 
-        Ok(df * currency_forescast_factor)
-    }
-
-    fn gen_fwd_data(&self, fwd: ForwardRateRequest) -> Result<f64> {
-        let id = fwd.provider_id();
-        let end_date = fwd.end_date();
-        let ref_date = self.market_store.reference_date();
-        if end_date <= ref_date {
-            return Ok(0.0);
-        }
-
-        let fwd_rate_provider =
-            self.market_store
-                .curves_map()
-                .get(&id)
-                .ok_or(AtlasError::BootstrappingErr(format!(
-                    "Curve with id {} not found in bootstrapping market store",
-                    id
-                )))?;
-
-        let start_date = fwd.start_date();
-        Ok(fwd_rate_provider.forward_rate(
-            start_date,
-            end_date,
-            fwd.compounding(),
-            fwd.frequency(),
-        )?)
-    }
-
-    fn gen_fx_data(&self, fx: ExchangeRateRequest) -> Result<f64> {
-        let first_currency = fx.first_currency();
-        let second_currency = match fx.second_currency() {
-            Some(ccy) => ccy,
-            None => self.market_store.local_currency(),
-        };
-
-        if first_currency == second_currency {
-            return Ok(1.0);
-        }
-
-        let spot = self
-            .market_store
-            .get_discounted_exchange_rate(first_currency, second_currency)?;
-
-        match fx.reference_date() {
-            Some(date) => {
-                if date > self.reference_date() {
-                    let currency_forescast_factor = self.market_store.currency_forescast_factor(
-                        first_currency,
-                        second_currency,
-                        date,
-                    )?;
-                    Ok(spot * currency_forescast_factor)
-                } else {
-                    Ok(spot)
+            let currency_forescast_factor = match df_request.discount_currency() {
+                Some(currency) => {
+                    self.market_store
+                        .currency_forescast_factor(curve.currency(), currency, date)?
                 }
-            }
-            None => Ok(spot),
-        }
+                None => 1.0,
+            };
+            df * currency_forescast_factor
+        };
+
+        // 3.- Cache data
+        let mut cache = self
+            .discount_factors_cache
+            .write()
+            .map_err(|_| AtlasError::PoisonedCacheErr("discount_factors_cache".to_string()))?;
+        let entry = cache.entry(df_request.clone()).or_insert(computed);
+        Ok(*entry)
     }
 
-    fn gen_numerarie(&self, _: &MarketRequest) -> Result<f64> {
-        Ok(1.0)
+    fn gen_fwd_data(&self, fwd: &ForwardRateRequest) -> Result<f64> {
+        // 1.- Check cache and return if hit
+        if let Some(hit) = {
+            self.forward_rates_cache
+                .read()
+                .map_err(|_| AtlasError::PoisonedCacheErr("forward_rates_cache".to_string()))?
+                .get(fwd)
+                .copied()
+        } {
+            return Ok(hit);
+        }
+
+        // 2.- no cache hit, gen data
+        let ref_date = self.market_store.reference_date();
+        let computed = if fwd.end_date() <= ref_date {
+            0.0
+        } else {
+            let id = fwd.provider_id();
+            let fwd_rate_provider =
+                self.market_store
+                    .curves_map()
+                    .get(&id)
+                    .ok_or(AtlasError::BootstrappingErr(format!(
+                        "Curve with id {} not found in bootstrapping market store",
+                        id
+                    )))?;
+            fwd_rate_provider.forward_rate(
+                fwd.start_date(),
+                fwd.end_date(),
+                fwd.compounding(),
+                fwd.frequency(),
+            )?
+        };
+
+        // 3.- Cache data
+        let mut cache = self
+            .forward_rates_cache
+            .write()
+            .map_err(|_| AtlasError::PoisonedCacheErr("forward_rates_cache".into()))?;
+        let entry = cache.entry(fwd.clone()).or_insert(computed);
+        Ok(*entry)
     }
+
+    fn gen_fx_data(&self, fx: &ExchangeRateRequest) -> Result<f64> {
+        // 1.- Check cache and return if hit
+        if let Some(hit) = {
+            self.fx_cache
+                .read()
+                .map_err(|_| AtlasError::PoisonedCacheErr("fx_cache".into()))?
+                .get(fx)
+                .copied()
+        } {
+            return Ok(hit);
+        }
+
+        let first_ccy = fx.first_currency();
+        let second_ccy = fx
+            .second_currency()
+            .unwrap_or_else(|| self.market_store.local_currency());
+
+        let computed = if first_ccy == second_ccy {
+            1.0
+        } else {
+            let spot = self
+                .market_store
+                .get_discounted_exchange_rate(first_ccy, second_ccy)?;
+
+            match fx.generation_method() {
+                Some(method) => match method {
+                    ExchangeGenerationMethod::SingleDate(single_date) => {
+                        if single_date.date() > self.reference_date() {
+                            let currency_forescast_factor =
+                                self.market_store.currency_forescast_factor(
+                                    first_ccy,
+                                    second_ccy,
+                                    single_date.date(),
+                                )?;
+                            spot * currency_forescast_factor
+                        } else {
+                            spot
+                        }
+                    }
+                    ExchangeGenerationMethod::DateWindow(_date_window) => {
+                        return Err(AtlasError::InvalidValueErr(
+                            "Date window not implemented for bootstrapping".to_string(),
+                        ));
+                    }
+                    ExchangeGenerationMethod::Triangulation(_triangulation) => {
+                        return Err(AtlasError::InvalidValueErr(
+                            "Triangulation not implemented for bootstrapping".to_string(),
+                        ));
+                    }
+                },
+                None => spot,
+            }
+        };
+        let mut cache = self
+            .fx_cache
+            .write()
+            .map_err(|_| AtlasError::PoisonedCacheErr("fx_cache".into()))?;
+        let entry = cache.entry(fx.clone()).or_insert(computed);
+        Ok(*entry)
+    }
+
+    // fn gen_numerarie(&self, _: &MarketRequest) -> Result<f64> {
+    //     Ok(1.0)
+    // }
 }
 
 #[cfg(test)]

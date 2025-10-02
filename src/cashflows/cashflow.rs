@@ -6,11 +6,12 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    cashflows::indexfxcashflow::IndexFxCashflow,
     core::{
-        meta::MarketRequest,
+        meta::{DiscountFactorRequest, ExchangeRateRequest, ForwardRateRequest},
         traits::{HasCurrency, HasDiscountCurveId, HasForecastCurveId, Registrable},
     },
-    currencies::enums::Currency,
+    currencies::{enums::Currency, exchangerategeneration::ExchangeGenerationMethod},
     time::date::Date,
     utils::errors::{AtlasError, Result},
 };
@@ -25,12 +26,13 @@ use super::{
 
 /// # Cashflow
 /// Enum that represents a cashflow.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Cashflow {
     Redemption(SimpleCashflow),
     Disbursement(SimpleCashflow),
     FixedRateCoupon(FixedRateCoupon),
     FloatingRateCoupon(FloatingRateCoupon),
+    IndexFxCashflow(IndexFxCashflow),
 }
 
 impl Cashflow {
@@ -40,6 +42,7 @@ impl Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.set_discount_curve_id(id),
             Cashflow::FixedRateCoupon(coupon) => coupon.set_discount_curve_id(id),
             Cashflow::FloatingRateCoupon(coupon) => coupon.set_discount_curve_id(id),
+            Cashflow::IndexFxCashflow(coupon) => coupon.set_discount_curve_id(id),
         }
     }
 
@@ -58,6 +61,7 @@ impl From<CashflowType> for String {
             CashflowType::Disbursement => "Disbursement".to_string(),
             CashflowType::FixedRateCoupon => "FixedRateCoupon".to_string(),
             CashflowType::FloatingRateCoupon => "FloatingRateCoupon".to_string(),
+            CashflowType::IndexFxCashflow => "IndexFxCashflow".to_string(),
         }
     }
 }
@@ -69,6 +73,7 @@ impl Payable for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.amount(),
             Cashflow::FixedRateCoupon(coupon) => coupon.amount(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.amount(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.amount(),
         }
     }
 
@@ -78,6 +83,7 @@ impl Payable for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.side(),
             Cashflow::FixedRateCoupon(coupon) => coupon.side(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.side(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.side(),
         }
     }
 
@@ -87,6 +93,7 @@ impl Payable for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.payment_date(),
             Cashflow::FixedRateCoupon(coupon) => coupon.payment_date(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.payment_date(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.payment_date(),
         }
     }
 
@@ -96,15 +103,17 @@ impl Payable for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.payment_currency(),
             Cashflow::FixedRateCoupon(coupon) => coupon.payment_currency(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.payment_currency(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.payment_currency(),
         }
     }
 
-    fn exchange_fixing_date(&self) -> Result<Date> {
+    fn exchange_fixing_method(&self) -> Result<&Option<ExchangeGenerationMethod>> {
         match self {
-            Cashflow::Redemption(cashflow) => cashflow.exchange_fixing_date(),
-            Cashflow::Disbursement(cashflow) => cashflow.exchange_fixing_date(),
-            Cashflow::FixedRateCoupon(coupon) => coupon.exchange_fixing_date(),
-            Cashflow::FloatingRateCoupon(coupon) => coupon.exchange_fixing_date(),
+            Cashflow::Redemption(cashflow) => cashflow.exchange_fixing_method(),
+            Cashflow::Disbursement(cashflow) => cashflow.exchange_fixing_method(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.exchange_fixing_method(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.exchange_fixing_method(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.exchange_fixing_method(),
         }
     }
 }
@@ -116,6 +125,7 @@ impl HasCurrency for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.currency(),
             Cashflow::FixedRateCoupon(coupon) => coupon.currency(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.currency(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.currency(),
         }
     }
 }
@@ -127,6 +137,7 @@ impl HasDiscountCurveId for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.discount_curve_id(),
             Cashflow::FixedRateCoupon(coupon) => coupon.discount_curve_id(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.discount_curve_id(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.discount_curve_id(),
         }
     }
 }
@@ -138,6 +149,7 @@ impl HasForecastCurveId for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.forecast_curve_id(),
             Cashflow::FixedRateCoupon(coupon) => coupon.forecast_curve_id(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.forecast_curve_id(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.forecast_curve_id(),
         }
     }
 }
@@ -149,6 +161,7 @@ impl Registrable for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.set_id(id),
             Cashflow::FixedRateCoupon(coupon) => coupon.set_id(id),
             Cashflow::FloatingRateCoupon(coupon) => coupon.set_id(id),
+            Cashflow::IndexFxCashflow(coupon) => coupon.set_id(id),
         }
     }
 
@@ -158,15 +171,57 @@ impl Registrable for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.id(),
             Cashflow::FixedRateCoupon(coupon) => coupon.id(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.id(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.id(),
         }
     }
 
-    fn market_request(&self) -> Result<MarketRequest> {
+    fn df_request(&self) -> Result<Option<DiscountFactorRequest>> {
         match self {
-            Cashflow::Redemption(cashflow) => cashflow.market_request(),
-            Cashflow::Disbursement(cashflow) => cashflow.market_request(),
-            Cashflow::FixedRateCoupon(coupon) => coupon.market_request(),
-            Cashflow::FloatingRateCoupon(coupon) => coupon.market_request(),
+            Cashflow::Redemption(cashflow) => cashflow.df_request(),
+            Cashflow::Disbursement(cashflow) => cashflow.df_request(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.df_request(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.df_request(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.df_request(),
+        }
+    }
+
+    fn fwd_request(&self) -> Result<Option<ForwardRateRequest>> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.fwd_request(),
+            Cashflow::Disbursement(cashflow) => cashflow.fwd_request(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.fwd_request(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.fwd_request(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.fwd_request(),
+        }
+    }
+
+    fn fx_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.fx_request(),
+            Cashflow::Disbursement(cashflow) => cashflow.fx_request(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.fx_request(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.fx_request(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.fx_request(),
+        }
+    }
+
+    fn fx_fwd_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.fx_fwd_request(),
+            Cashflow::Disbursement(cashflow) => cashflow.fx_fwd_request(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.fx_fwd_request(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.fx_fwd_request(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.fx_fwd_request(),
+        }
+    }
+
+    fn fx_fixing_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        match self {
+            Cashflow::Redemption(cashflow) => cashflow.fx_fixing_request(),
+            Cashflow::Disbursement(cashflow) => cashflow.fx_fixing_request(),
+            Cashflow::FixedRateCoupon(coupon) => coupon.fx_fixing_request(),
+            Cashflow::FloatingRateCoupon(coupon) => coupon.fx_fixing_request(),
+            Cashflow::IndexFxCashflow(coupon) => coupon.fx_fixing_request(),
         }
     }
 }
@@ -176,12 +231,13 @@ impl InterestAccrual for Cashflow {
         match self {
             Cashflow::FixedRateCoupon(coupon) => coupon.accrual_end_date(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.accrual_end_date(),
-            Cashflow::Disbursement(_) | Cashflow::Redemption(_) => {
+            Cashflow::Disbursement(_) | Cashflow::Redemption(_) | Cashflow::IndexFxCashflow(_) => {
                 Err(AtlasError::InvalidValueErr(
-                    "Disbursement and Redemption cashflows do not have an accrual end date"
+                    "Disbursement, Redemption and IndexFxCashflow cashflows do not have an accrual end date"
                         .to_string(),
                 ))
             }
+
         }
     }
 
@@ -189,9 +245,9 @@ impl InterestAccrual for Cashflow {
         match self {
             Cashflow::FixedRateCoupon(coupon) => coupon.accrual_start_date(),
             Cashflow::FloatingRateCoupon(coupon) => coupon.accrual_start_date(),
-            Cashflow::Disbursement(_) | Cashflow::Redemption(_) => {
+            Cashflow::Disbursement(_) | Cashflow::Redemption(_) | Cashflow::IndexFxCashflow(_) => {
                 Err(AtlasError::InvalidValueErr(
-                    "Disbursement and Redemption cashflows do not have an accrual start date"
+                    "Disbursement, Redemption and IndexFxCashflow cashflows do not have an accrual start date"
                         .to_string(),
                 ))
             }
@@ -245,6 +301,7 @@ impl Scalable for Cashflow {
             Cashflow::Disbursement(cashflow) => cashflow.scale(factor),
             Cashflow::FixedRateCoupon(coupon) => coupon.scale(factor),
             Cashflow::FloatingRateCoupon(coupon) => coupon.scale(factor),
+            Cashflow::IndexFxCashflow(coupon) => coupon.scale(factor),
         }
     }
 }
@@ -328,10 +385,29 @@ impl Display for Cashflow {
                 "fix ".bold().yellow(),
                 format!(
                     "{} - {}",
-                    coupon.fixing_start_date().unwrap_or(None).unwrap_or(Date::new(1970, 1, 1)),
-                    coupon.fixing_end_date().unwrap_or(None).unwrap_or(Date::new(1970, 1, 1))
+                    coupon
+                        .fixing_start_date()
+                        .unwrap_or(None)
+                        .unwrap_or(Date::new(1970, 1, 1)),
+                    coupon
+                        .fixing_end_date()
+                        .unwrap_or(None)
+                        .unwrap_or(Date::new(1970, 1, 1))
                 )
                 .cyan()
+            ),
+            Cashflow::IndexFxCashflow(cashflow) => write!(
+                f,
+                "{} {} {} {} {} {} {} {} {}",
+                "Pay date:".bold().yellow(),
+                cashflow.payment_date().to_string().cyan(),
+                "type:".bold().yellow(),
+                "indexfx".cyan(),
+                " - ".white().bold(),
+                "amount: ".bold().yellow(),
+                format!("{:.2} {} pay in {}", amount, currency, payment_currency).cyan(),
+                "side:".bold().yellow(),
+                format!("{:?}", cashflow.side()).cyan()
             ),
         }
     }
@@ -345,6 +421,7 @@ pub enum CashflowType {
     Disbursement,
     FixedRateCoupon,
     FloatingRateCoupon,
+    IndexFxCashflow,
 }
 
 #[cfg(test)]

@@ -37,6 +37,8 @@ pub enum AtlasError {
     SolverError(#[from] crate::math::solver::traits::SolverError),
     #[error("Interpolation error: {0}")]
     InterpolationErr(String),
+    #[error("Poisoned Cache error: {0}")]
+    PoisonedCacheErr(String),
 }
 
 pub type Result<T> = std::result::Result<T, AtlasError>;

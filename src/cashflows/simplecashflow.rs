@@ -2,10 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{
-        meta::{DiscountFactorRequest, ExchangeRateRequest, MarketRequest},
+        meta::{DiscountFactorRequest, ExchangeRateRequest, ForwardRateRequest},
         traits::{HasCurrency, HasDiscountCurveId, HasForecastCurveId, Registrable},
     },
-    currencies::enums::Currency,
+    currencies::{
+        enums::Currency,
+        exchangerategeneration::{ExchangeGenerationMethod, SingleDate},
+    },
     time::date::Date,
     utils::errors::{AtlasError, Result},
 };
@@ -26,11 +29,11 @@ use super::{
 /// assert_eq!(cashflow.side(), Side::Receive);
 /// assert_eq!(cashflow.payment_date(), payment_date);
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SimpleCashflow {
     payment_date: Date,
-    exchange_fixing_date: Option<Date>,
-    currency: Currency, // currency of amount
+    exchange_fixing_method: Option<ExchangeGenerationMethod>,
+    currency: Currency,
     payment_currency: Option<Currency>,
     side: Side,
     amount: Option<f64>,
@@ -42,7 +45,7 @@ impl SimpleCashflow {
     pub fn new(payment_date: Date, currency: Currency, side: Side) -> SimpleCashflow {
         SimpleCashflow {
             payment_date,
-            exchange_fixing_date: Some(payment_date),
+            exchange_fixing_method: None,
             currency,
             payment_currency: None,
             side,
@@ -54,11 +57,6 @@ impl SimpleCashflow {
 
     pub fn with_amount(mut self, amount: f64) -> SimpleCashflow {
         self.amount = Some(amount);
-        self
-    }
-
-    pub fn with_exchange_fixing_date(mut self, date: Date) -> SimpleCashflow {
-        self.exchange_fixing_date = Some(date);
         self
     }
 
@@ -77,6 +75,20 @@ impl SimpleCashflow {
         self
     }
 
+    pub fn with_exchange_fixing_method(
+        mut self,
+        method: ExchangeGenerationMethod,
+    ) -> SimpleCashflow {
+        self.exchange_fixing_method = Some(method);
+        self
+    }
+
+    pub fn with_exchange_fixing_date(mut self, date: Date) -> SimpleCashflow {
+        self.exchange_fixing_method =
+            Some(ExchangeGenerationMethod::SingleDate(SingleDate::new(date)));
+        self
+    }
+
     pub fn set_discount_curve_id(&mut self, id: usize) {
         self.discount_curve_id = Some(id);
     }
@@ -89,8 +101,13 @@ impl SimpleCashflow {
         self.payment_currency = Some(currency);
     }
 
+    pub fn set_exchange_fixing_method(&mut self, method: ExchangeGenerationMethod) {
+        self.exchange_fixing_method = Some(method);
+    }
+
     pub fn set_exchange_fixing_date(&mut self, date: Date) {
-        self.exchange_fixing_date = Some(date);
+        self.exchange_fixing_method =
+            Some(ExchangeGenerationMethod::SingleDate(SingleDate::new(date)));
     }
 }
 
@@ -125,31 +142,35 @@ impl Registrable for SimpleCashflow {
         self.id = Some(id);
     }
 
-    fn market_request(&self) -> Result<MarketRequest> {
-        let id = self.id()?;
-        let currency_request = ExchangeRateRequest::new(
-            self.payment_currency()?,
-            None, 
-            None,
-        );
-        let currency_fwd_request = ExchangeRateRequest::new(
-            self.payment_currency()?, 
-            Some(self.currency()?), 
-            Some(self.exchange_fixing_date()?),
-        );
-        let mut discount_request = DiscountFactorRequest::new(
-            self.discount_curve_id()?, 
-            self.payment_date
-        );
-        discount_request.set_discount_currency(self.payment_currency()?);
+    fn df_request(&self) -> Result<Option<DiscountFactorRequest>> {
+        let mut discount_request =
+            DiscountFactorRequest::new(self.discount_curve_id()?, self.payment_date);
 
-        return Ok(MarketRequest::new(
-            id,
-            Some(discount_request),
-            None,
-            Some(currency_request),
-            Some(currency_fwd_request),
-        ));
+        discount_request.set_discount_currency(self.payment_currency()?);
+        Ok(Some(discount_request))
+    }
+
+    fn fwd_request(&self) -> Result<Option<ForwardRateRequest>> {
+        Ok(None)
+    }
+
+    fn fx_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        let currency_request =
+            ExchangeRateRequest::new_with_method(self.payment_currency()?, None, None);
+        Ok(Some(currency_request))
+    }
+
+    fn fx_fwd_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        let currency_fwd_request = ExchangeRateRequest::new_with_method(
+            self.payment_currency()?,
+            Some(self.currency()?),
+            self.exchange_fixing_method()?.clone(),
+        );
+        Ok(Some(currency_fwd_request))
+    }
+
+    fn fx_fixing_request(&self) -> Result<Option<ExchangeRateRequest>> {
+        Ok(None)
     }
 }
 
@@ -168,8 +189,8 @@ impl Payable for SimpleCashflow {
     fn payment_currency(&self) -> Result<Currency> {
         return Ok(self.payment_currency.unwrap_or(self.currency));
     }
-    fn exchange_fixing_date(&self) -> Result<Date> {
-        return Ok(self.exchange_fixing_date.unwrap_or(self.payment_date));
+    fn exchange_fixing_method(&self) -> Result<&Option<ExchangeGenerationMethod>> {
+        return Ok(&self.exchange_fixing_method);
     }
 }
 
@@ -243,7 +264,12 @@ mod tests {
         assert_eq!(cashflow.side(), side);
         assert_eq!(cashflow.amount()?, amount);
         assert_eq!(cashflow.payment_currency()?, payment_currency);
-        assert_eq!(cashflow.exchange_fixing_date()?, exchange_fixing_date);
+        assert_eq!(
+            cashflow.exchange_fixing_method()?,
+            &Some(ExchangeGenerationMethod::SingleDate(SingleDate::new(
+                exchange_fixing_date
+            )))
+        );
         assert_eq!(cashflow.discount_curve_id()?, discount_curve_id);
         assert_eq!(cashflow.id()?, id);
         Ok(())
@@ -263,7 +289,12 @@ mod tests {
         assert_eq!(cashflow.amount()?, 500.0);
         assert_eq!(cashflow.discount_curve_id()?, 7);
         assert_eq!(cashflow.payment_currency()?, Currency::USD);
-        assert_eq!(cashflow.exchange_fixing_date()?, fixing_date);
+        assert_eq!(
+            cashflow.exchange_fixing_method()?,
+            &Some(ExchangeGenerationMethod::SingleDate(SingleDate::new(
+                fixing_date
+            )))
+        );
         Ok(())
     }
 
@@ -321,7 +352,7 @@ mod tests {
     fn test_exchange_fixing_date_defaults_to_payment_date() -> Result<()> {
         let date = Date::new(2022, 2, 2);
         let cashflow = SimpleCashflow::new(date, Currency::EUR, Side::Receive).with_amount(100.0);
-        assert_eq!(cashflow.exchange_fixing_date()?, date);
+        assert_eq!(cashflow.exchange_fixing_method()?, &None);
         Ok(())
     }
 }

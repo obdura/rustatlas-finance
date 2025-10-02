@@ -55,7 +55,7 @@ pub use crate::{
         period::*,
         schedule::*,
     },
-    utils::{marketstoretransformation::*, errors::*},
+    utils::{errors::*, marketstoretransformation::*},
     visitors::{
         compressorvisitors::{cashflowaggregationvisitor::*, cashflowcompressorconstvisitor::*},
         flowconsolidationvisitors::{
@@ -63,7 +63,7 @@ pub use crate::{
             notpayinterestconstvisitor::*, outstandingsconstvisitor::*, placementconstvisitor::*,
             redemptionsconstvisitor::*,
         },
-        indexingvisitors::{fixingvisitor::*, indexingvisitor::*},
+        fixingvisitor::fixingfxvisitor::*,
         metricsvisitors::{durationconstvisitor::*, dv01constvisitor::*, zspreadconstvisitor::*},
         npvvisitors::{npvbydateconstvisitor::*, npvbytenorconstvisitor::*, npvconstvisitor::*},
         parvaluevisitors::traits::*,

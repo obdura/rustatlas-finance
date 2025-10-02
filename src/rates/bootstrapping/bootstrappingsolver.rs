@@ -3,13 +3,12 @@ use crate::{
         gaussnewton::GaussNewton,
         traits::{Hessian, Jacobian, Residual},
     },
-    models::traits::Model,
     rates::bootstrapping::{
         bootstrappingengine::BootstrappingEngine, bootstrappingmarketstore::BootstrappingModel,
     },
     utils::errors::Result,
     visitors::{
-        indexingvisitors::fixingvisitor::FixingVisitor,
+        fixingvisitor::fixingvisitor::FixingVisitor,
         npvvisitors::npvconstvisitor::NPVConstVisitor,
         traits::{ConstVisit, Visit},
     },
@@ -139,7 +138,6 @@ impl<'a> BootstrappingSolver<'a> {
             }
         };
 
-        self.engine.borrow_mut().init_market_request_cache()?;
         for order in optimization_orders {
             self.engine.borrow_mut().set_optimization_order(order);
             self.engine
@@ -158,41 +156,22 @@ impl<'a> BootstrappingSolver<'a> {
     }
 
     pub fn compute_residuals(&self, discount_factors: &Vec<f64>) -> Result<Vec<f64>> {
-        let data_map = {
-            let mut engine = self.engine.borrow_mut();
-            engine.update_discount_factors(discount_factors)?;
-            let relevant_instruments = engine.relevant_instruments();
-            let market_request_cache = engine.market_request_cache();
-            let model = BootstrappingModel::new(engine.market_store());
-
-            let data: Vec<_> = relevant_instruments
-                .iter()
-                .map(|&relevant_instrument| {
-                    let market_request = &market_request_cache[relevant_instrument];
-                    let data_row = model.gen_market_data(market_request)?;
-                    Ok((relevant_instrument, data_row))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            data
-        };
-
-        let residuals = {
-            let mut engine = self.engine.borrow_mut();
-            let instruments = engine.instruments_mut();
-
-            data_map
-                .iter()
-                .map(|(index, data)| {
-                    let mut instrument = &mut instruments[*index];
-                    let fixing_visitor = FixingVisitor::new(data);
-                    let npv_visitor = NPVConstVisitor::new(data, true);
-                    fixing_visitor.visit(&mut instrument)?;
-                    let npv = npv_visitor.visit(&mut instrument)?;
-                    Ok(npv)
-                })
-                .collect::<Result<Vec<f64>>>()?
-        };
-
+        let mut engine = self.engine.borrow_mut();
+        engine.update_discount_factors(discount_factors)?;
+        let relevant_instruments = engine.relevant_instruments();
+        let (market_store, instruments) = engine.market_store_and_instruments_mut();
+        let model = BootstrappingModel::new(market_store);
+        let fixing_visitor = FixingVisitor::new(&model);
+        let npv_visitor = NPVConstVisitor::new(&model, true);
+        let residuals = relevant_instruments
+            .iter()
+            .map(|&relevant_instrument| -> Result<f64> {
+                let mut instrument = &mut instruments[relevant_instrument];
+                fixing_visitor.visit(&mut instrument)?;
+                let npv = npv_visitor.visit(&instrument)?;
+                Ok(npv)
+            })
+            .collect::<Result<Vec<f64>>>()?;
         Ok(residuals)
     }
 
@@ -201,48 +180,27 @@ impl<'a> BootstrappingSolver<'a> {
         discount_factors: &Vec<f64>,
         non_zero: &Vec<usize>,
     ) -> Result<Vec<Option<f64>>> {
-        let data_map = {
-            let mut engine = self.engine.borrow_mut();
-            engine.update_discount_factors(discount_factors)?;
-            let relevant_instruments = engine.relevant_instruments();
-            let market_request_cache = engine.market_request_cache();
-            let model = BootstrappingModel::new(engine.market_store());
-            let data: Vec<_> = relevant_instruments
-                .iter()
-                .enumerate()
-                .map(|(id, &relevant_instrument)| {
-                    if !non_zero.contains(&id) {
-                        return Ok((relevant_instrument, None));
-                    } else {
-                        let market_request = &market_request_cache[relevant_instrument];
-                        let data_row = model.gen_market_data(market_request)?;
-                        Ok((relevant_instrument, Some(data_row)))
-                    }
-                })
-                .collect::<Result<Vec<_>>>()?;
-            data
-        };
-
-        let residuals = {
-            let mut engine = self.engine.borrow_mut();
-            let instruments = engine.instruments_mut();
-
-            data_map
-                .iter()
-                .map(|(index, data)| {
-                    if let Some(data) = data {
-                        let mut instrument = &mut instruments[*index];
-                        let fixing_visitor = FixingVisitor::new(data);
-                        let npv_visitor = NPVConstVisitor::new(data, true);
-                        fixing_visitor.visit(&mut instrument)?;
-                        let npv = npv_visitor.visit(&mut instrument)?;
-                        Ok(Some(npv))
-                    } else {
-                        Ok(None)
-                    }
-                })
-                .collect::<Result<Vec<Option<f64>>>>()?
-        };
+        let mut engine = self.engine.borrow_mut();
+        engine.update_discount_factors(discount_factors)?;
+        let relevant_instruments = engine.relevant_instruments();
+        let (market_store, instruments) = engine.market_store_and_instruments_mut();
+        let model = BootstrappingModel::new(market_store);
+        let fixing_visitor = FixingVisitor::new(&model);
+        let npv_visitor = NPVConstVisitor::new(&model, true);
+        let residuals = relevant_instruments
+            .iter()
+            .enumerate()
+            .map(|(id, &relevant_instrument)| -> Result<Option<f64>> {
+                if !non_zero.contains(&id) {
+                    return Ok(None);
+                } else {
+                    let mut instrument = &mut instruments[relevant_instrument];
+                    fixing_visitor.visit(&mut instrument)?;
+                    let npv = npv_visitor.visit(&instrument)?;
+                    Ok(Some(npv))
+                }
+            })
+            .collect::<Result<Vec<Option<f64>>>>()?;
         Ok(residuals)
     }
 

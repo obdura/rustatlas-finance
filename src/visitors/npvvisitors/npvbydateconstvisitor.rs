@@ -1,36 +1,29 @@
 use crate::{
     cashflows::traits::Payable,
-    core::{
-        meta::MarketData,
-        traits::{HasCurrency, Registrable},
-    },
+    core::traits::Registrable,
+    models::traits::Model,
     time::date::Date,
     utils::errors::{AtlasError, Result},
     visitors::traits::{ConstVisit, HasCashflows},
 };
-
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 /// # NPVByDateConstVisitor
 /// NPVByDateConstVisitor is a visitor that calculates the NPV of an instrument and returns the result in a BTreeMap
 /// where the key is the payment date of the cashflow and the value is the NPV of the cashflow.
-/// It assumes that the cashflows of the instrument have already been indexed and fixed.
+/// It assumes that the cashflows of the instrument have already been fixed.
 pub struct NPVByDateConstVisitor<'a> {
-    market_data: &'a [MarketData],
+    model: &'a dyn Model,
     include_today_cashflows: bool,
     reference_date: Date,
     in_local_currency: bool,
 }
 
 impl<'a> NPVByDateConstVisitor<'a> {
-    pub fn new(
-        reference_date: Date,
-        market_data: &'a [MarketData],
-        include_today_cashflows: bool,
-    ) -> Self {
+    pub fn new(reference_date: Date, model: &'a dyn Model, include_today_cashflows: bool) -> Self {
         NPVByDateConstVisitor {
             reference_date,
-            market_data: market_data,
+            model,
             include_today_cashflows,
             in_local_currency: false,
         }
@@ -46,50 +39,62 @@ impl<'a> NPVByDateConstVisitor<'a> {
 impl<'a, T: HasCashflows> ConstVisit<T> for NPVByDateConstVisitor<'a> {
     type Output = Result<BTreeMap<Date, f64>>;
     fn visit(&self, visitable: &T) -> Self::Output {
-        let mut currencies = HashSet::new();
-        for cf in visitable.cashflows() {
-            currencies.insert(cf.currency()?);
-        }
-
         let mut in_local_currency = self.in_local_currency;
-        if currencies.len() > 1 {
-            in_local_currency = true;
+        // First loop: check if cashflows are in local currency
+        if !in_local_currency {
+            let mut first_currency = None;
+            let mut multi_currency = false;
+            for cf in visitable.cashflows() {
+                let currency = cf.payment_currency()?;
+                if let Some(cur) = first_currency {
+                    if cur != currency {
+                        multi_currency = true;
+                        break;
+                    }
+                } else {
+                    first_currency = Some(currency);
+                }
+            }
+            if multi_currency {
+                in_local_currency = true;
+            }
         }
-
+        
         let mut npv_result = BTreeMap::new();
         npv_result.insert(self.reference_date, 0.0);
-        visitable.cashflows().try_for_each(|cf| -> Result<()> {
-            let id = cf.id()?;
-            let cf_market_data =
-                self.market_data
-                    .get(id)
-                    .ok_or(AtlasError::NotFoundErr(format!(
-                        "Market data for cashflow with id {}",
-                        id
-                    )))?;
-
-            if cf_market_data.reference_date() == cf.payment_date() && !self.include_today_cashflows
-                || cf.payment_date() < cf_market_data.reference_date()
+        for cf in visitable.cashflows() {
+            if (self.model.reference_date() == cf.payment_date() && !self.include_today_cashflows)
+                || cf.payment_date() < self.model.reference_date()
             {
-                return Ok(());
+                continue;
             }
 
-            let df = cf_market_data.df()?;
-            let fx = cf_market_data.fx()?;
+            let df_request = &cf.df_request()?.ok_or(AtlasError::NotFoundErr(format!(
+                "Discount factor request not found"
+            )))?;
+            let df = self.model.gen_df_data(df_request)?;
             let flag = cf.side().sign();
-            let fx_fwd = cf_market_data.fx_fwd()?;
+
+            let fx_fwd_request = &cf.fx_fwd_request()?.ok_or(AtlasError::NotFoundErr(format!(
+                "Forward rate request not found"
+            )))?;
+
+            let fx_fwd = self.model.gen_fx_data(fx_fwd_request)?;
             let amount = cf.amount()?;
 
             let npv = if in_local_currency {
+                let fx_request = &cf.fx_request()?.ok_or(AtlasError::NotFoundErr(format!(
+                    "Exchange rate request not found"
+                )))?;
+                let fx = self.model.gen_fx_data(fx_request)?;
                 amount * fx_fwd * df * flag / fx
             } else {
                 amount * fx_fwd * df * flag
             };
 
             let acc = npv_result.entry(cf.payment_date()).or_insert(0.0);
-            *acc += npv;
-            Ok(())
-        })?;
+            *acc += npv
+        }
         Ok(npv_result)
     }
 }
@@ -107,7 +112,7 @@ mod tests {
         core::marketstore::MarketStore,
         currencies::enums::Currency,
         instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument,
-        models::{simplemodel::SimpleModel, traits::Model},
+        models::simplemodel::SimpleModel,
         rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
@@ -120,7 +125,6 @@ mod tests {
             enums::{Frequency, TimeUnit},
             period::Period,
         },
-        visitors::{indexingvisitors::indexingvisitor::IndexingVisitor, traits::Visit},
     };
 
     pub fn create_store() -> Result<MarketStore> {
@@ -191,9 +195,8 @@ mod tests {
     }
 
     #[test]
-    fn test_npv_by_date_const_visitor_expired_instrument() -> Result<()> {
+    fn test_model_npv_by_date_const_visitor_expired_instrument() -> Result<()> {
         let market_store = create_store().unwrap();
-        let indexer = IndexingVisitor::new();
 
         let start_date = Date::new(2010, 1, 1);
         let end_date = start_date + Period::new(5, TimeUnit::Years);
@@ -205,7 +208,7 @@ mod tests {
             DayCounter::Actual360,
         );
 
-        let mut instrument_1 = MakeFixedRateInstrument::new()
+        let instrument_1 = MakeFixedRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_payment_frequency(Frequency::Semiannual)
@@ -217,9 +220,7 @@ mod tests {
             .bullet()
             .build()?;
 
-        let _ = indexer.visit(&mut instrument_1);
-
-        let mut instrument_2 = MakeFixedRateInstrument::new()
+        let instrument_2 = MakeFixedRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_payment_frequency(Frequency::Monthly)
@@ -230,12 +231,11 @@ mod tests {
             .with_currency(Currency::USD)
             .bullet()
             .build()?;
-        let _ = indexer.visit(&mut instrument_2);
 
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let npv_visitor = NPVByDateConstVisitor::new(market_store.reference_date(), &data, false);
+        let npv_visitor =
+            NPVByDateConstVisitor::new(market_store.reference_date(), &model, false);
         let npv_result_inst_1 = npv_visitor.visit(&instrument_1)?;
         let npv_result_inst_2 = npv_visitor.visit(&instrument_2)?;
 
@@ -248,7 +248,6 @@ mod tests {
     #[test]
     fn test_npv_by_date_const_visitor() -> Result<()> {
         let market_store = create_store().unwrap();
-        let indexer = IndexingVisitor::new();
 
         let start_date = Date::new(2020, 1, 1);
         let end_date = start_date + Period::new(5, TimeUnit::Years);
@@ -260,7 +259,7 @@ mod tests {
             DayCounter::Actual360,
         );
 
-        let mut instrument_1 = MakeFixedRateInstrument::new()
+        let instrument_1 = MakeFixedRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_payment_frequency(Frequency::Semiannual)
@@ -272,9 +271,7 @@ mod tests {
             .bullet()
             .build()?;
 
-        let _ = indexer.visit(&mut instrument_1);
-
-        let mut instrument_2 = MakeFixedRateInstrument::new()
+        let instrument_2 = MakeFixedRateInstrument::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_payment_frequency(Frequency::Monthly)
@@ -285,12 +282,11 @@ mod tests {
             .with_currency(Currency::USD)
             .bullet()
             .build()?;
-        let _ = indexer.visit(&mut instrument_2);
+
 
         let model = SimpleModel::new(&market_store);
-        let data = model.gen_market_data(&indexer.request())?;
 
-        let npv_visitor = NPVByDateConstVisitor::new(market_store.reference_date(), &data, false);
+        let npv_visitor = NPVByDateConstVisitor::new(market_store.reference_date(), &model, false);
         let npv_result_inst_1 = npv_visitor.visit(&instrument_1)?;
         let npv_result_inst_2 = npv_visitor.visit(&instrument_2)?;
 

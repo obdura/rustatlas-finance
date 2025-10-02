@@ -1,21 +1,13 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-};
+use std::fmt::Display;
 
 use crate::{
-    cashflows::traits::{Payable, RequiresFixingRate},
-    core::{
-        meta::MarketRequest,
-        traits::{HasDiscountCurveId, HasForecastCurveId},
-    },
     currencies::enums::Currency,
     rates::{
         bootstrapping::bootstrappingmarketstore::BootstrappingMarketStore, traits::HasReferenceDate,
     },
     time::date::Date,
     utils::errors::{AtlasError, Result},
-    visitors::{indexingvisitors::indexingvisitor::IndexingVisitor, traits::{HasCashflows, Visit}},
+    visitors::{traits::HasCashflows},
 };
 
 /// # BootstrappingEngine
@@ -31,7 +23,6 @@ pub struct BootstrappingEngine {
     reference_date: Date,
     market_store: BootstrappingMarketStore,
     instruments: Vec<Box<dyn HasCashflows>>,
-    market_request_cache: Vec<Vec<MarketRequest>>,
     number_of_instruments: usize,
     optimization_order: Vec<(usize, usize)>,
 }
@@ -42,7 +33,6 @@ impl BootstrappingEngine {
             reference_date,
             market_store: BootstrappingMarketStore::new(reference_date, local_currency),
             instruments: Vec::new(),
-            market_request_cache: Vec::new(),
             number_of_instruments: 0,
             optimization_order: Vec::new(),
         }
@@ -72,6 +62,12 @@ impl BootstrappingEngine {
         &mut self.instruments
     }
 
+    pub fn market_store_and_instruments_mut(
+        &mut self,
+    ) -> (&BootstrappingMarketStore, &mut Vec<Box<dyn HasCashflows>>) {
+        (&self.market_store, &mut self.instruments)
+    }
+    
     pub fn optimization_order(&self) -> &Vec<(usize, usize)> {
         &self.optimization_order
     }
@@ -80,14 +76,6 @@ impl BootstrappingEngine {
         self.optimization_order.len()
     }
 
-    pub fn market_request_cache(&self) -> &Vec<Vec<MarketRequest>> {
-        &self.market_request_cache
-    }
-    
-    pub fn market_request_cache_by_index(&self, index: &usize) -> &Vec<MarketRequest> {
-        &self.market_request_cache[*index]
-    }
-    
     pub fn set_discount_factors(&mut self, curve_id: usize, discount_factors: Vec<f64>) -> Result<()> {
         self.market_store.set_discount_factors(curve_id, discount_factors)
     }
@@ -189,58 +177,6 @@ impl BootstrappingEngine {
         }
     }
 
-    pub fn init_market_request_cache(&mut self) -> Result<()> {
-        let mut market_request_cache = Vec::new();
-        self.instruments_mut().iter_mut().try_for_each(|mut instrument| -> Result<()> {
-            let indexing_visitor = IndexingVisitor::new();
-            indexing_visitor.visit(&mut instrument)?;
-            let market_request = indexing_visitor.request();
-            market_request_cache.push(market_request);
-            Ok(())
-        })?;
-        self.market_request_cache = market_request_cache;
-        Ok(())
-    }
-}
-
-pub fn relevant_pricing_dates(
-    instruments: &Vec<Box<dyn HasCashflows>>,
-) -> Result<HashMap<usize, HashSet<Date>>> {
-    let mut pricing_dates = HashMap::new();
-
-    for inst in instruments {
-        inst.cashflows().try_for_each(|cf| -> Result<()> {
-            let discount_curve_id = cf.discount_curve_id()?;
-            let payment_date = cf.payment_date();
-            let exchange_fixing_date = cf.exchange_fixing_date()?;
-            pricing_dates
-                .entry(discount_curve_id)
-                .or_insert_with(HashSet::new)
-                .insert(payment_date);
-            pricing_dates
-                .entry(discount_curve_id)
-                .or_insert_with(HashSet::new)
-                .insert(exchange_fixing_date);
-
-            if let Ok(forescast_curve_id) = cf.forecast_curve_id() {
-                if let Some(fixing_start_date) = cf.fixing_start_date()? {
-                    pricing_dates
-                        .entry(forescast_curve_id)
-                        .or_insert_with(HashSet::new)
-                        .insert(fixing_start_date);
-                }
-                if let Some(fixing_end_date) = cf.fixing_end_date()? {
-                    pricing_dates
-                        .entry(forescast_curve_id)
-                        .or_insert_with(HashSet::new)
-                        .insert(fixing_end_date);
-                }
-            }
-            Ok(())
-        })?;
-    }
-
-    Ok(pricing_dates)
 }
 
 use colored::*;
@@ -321,10 +257,9 @@ mod tests {
         cashflows::side::Side,
         currencies::enums::Currency,
         instruments::constructors::makefixedrateinstrument::MakeFixedRateInstrument,
-        models::traits::Model,
         rates::{
             bootstrapping::{
-                bootstrappingengine::{relevant_pricing_dates, BootstrappingEngine},
+                bootstrappingengine::BootstrappingEngine,
                 bootstrappingmarketstore::BootstrappingModel,
             },
             enums::Compounding,
@@ -338,9 +273,8 @@ mod tests {
         },
         utils::errors::Result,
         visitors::{
-            indexingvisitors::indexingvisitor::IndexingVisitor,
             npvvisitors::npvconstvisitor::NPVConstVisitor,
-            traits::{ConstVisit, Visit},
+            traits::ConstVisit,
         },
     };
 
@@ -423,20 +357,8 @@ mod tests {
 
         engine.add_instrument(1, end_date, Box::new(inst))?;
 
-        let indexer = IndexingVisitor::new();
-        engine
-            .instruments_mut()
-            .iter_mut()
-            .try_for_each(|mut instrument| -> Result<()> {
-                indexer.visit(&mut instrument)?;
-                Ok(())
-            })?;
-
         let model = BootstrappingModel::new(engine.market_store());
-
-        let data = model.gen_market_data(&indexer.request()).unwrap();
-
-        let npv_visitor = NPVConstVisitor::new(&data, true);
+        let npv_visitor = NPVConstVisitor::new(&model, true);
         engine
             .instruments()
             .iter()
@@ -480,21 +402,9 @@ mod tests {
 
         engine.set_optimization_order(vec![(1, 1)]);
 
-        let indexer = IndexingVisitor::new();
-        engine
-            .instruments_mut()
-            .iter_mut()
-            .try_for_each(|mut instrument| -> Result<()> {
-                indexer.visit(&mut instrument)?;
-                Ok(())
-            })?;
-
         engine.update_discount_factors(&vec![0.5])?;
         let model = BootstrappingModel::new(engine.market_store());
-
-        let data = model.gen_market_data(&indexer.request()).unwrap();
-
-        let npv_visitor = NPVConstVisitor::new(&data, true);
+        let npv_visitor = NPVConstVisitor::new(&model, true);
         engine
             .instruments()
             .iter()
@@ -550,20 +460,8 @@ mod tests {
 
         engine.add_instrument(3, end_date, Box::new(inst2))?;
 
-        let indexer = IndexingVisitor::new();
-        engine
-            .instruments_mut()
-            .iter_mut()
-            .try_for_each(|mut instrument| -> Result<()> {
-                indexer.visit(&mut instrument)?;
-                Ok(())
-            })?;
-
         let model = BootstrappingModel::new(engine.market_store());
-
-        let data = model.gen_market_data(&indexer.request()).unwrap();
-
-        let npv_visitor = NPVConstVisitor::new(&data, true);
+        let npv_visitor = NPVConstVisitor::new(&model, true);
         engine
             .instruments()
             .iter()
@@ -620,21 +518,9 @@ mod tests {
         engine.add_instrument(3, end_date, Box::new(inst2))?;
         engine.set_optimization_order(vec![(1, 1), (3, 1)]);
 
-        let indexer = IndexingVisitor::new();
-        engine
-            .instruments_mut()
-            .iter_mut()
-            .try_for_each(|mut instrument| -> Result<()> {
-                indexer.visit(&mut instrument)?;
-                Ok(())
-            })?;
-
         engine.update_discount_factors(&vec![0.5, 0.25])?;
         let model = BootstrappingModel::new(engine.market_store());
-
-        let data = model.gen_market_data(&indexer.request()).unwrap();
-
-        let npv_visitor = NPVConstVisitor::new(&data, true);
+        let npv_visitor = NPVConstVisitor::new(&model, true);
         engine.instruments().get(0).map(|instrument| -> Result<()> {
             let npv = npv_visitor.visit(&instrument)?;
             let expected_npv = 1_000_000.0 * (1.0 + 0.05 / 360.0 * 365.0) * 0.5 - 1_000_000.0;
@@ -850,60 +736,4 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_relevant_pricing_dates() -> Result<()> {
-        let ref_date = Date::new(2022, 1, 1);
-        let mut engine = BootstrappingEngine::new(ref_date, Currency::USD);
-        let bootstrappingmarketstore = engine.market_store_mut();
-        bootstrappingmarketstore.add_curve(1, Currency::USD)?;
-        bootstrappingmarketstore.add_curve(3, Currency::USD)?;
-
-        let end_date = ref_date + Period::new(1, TimeUnit::Years);
-        let rate = InterestRate::new(
-            0.05,
-            Compounding::Simple,
-            Frequency::Annual,
-            DayCounter::Actual360,
-        );
-
-        let inst1 = MakeFixedRateInstrument::new()
-            .with_currency(Currency::USD)
-            .with_side(Side::Receive)
-            .with_start_date(ref_date)
-            .with_end_date(end_date)
-            .with_rate(rate)
-            .with_notional(1_000_000.0)
-            .with_discount_curve_id(Some(1)) // Assuming the curve ID is 1
-            .zero()
-            .build()?;
-
-        engine.add_instrument(1, end_date, Box::new(inst1))?;
-
-        let end_date = ref_date + Period::new(2, TimeUnit::Years);
-        let inst2 = MakeFixedRateInstrument::new()
-            .with_currency(Currency::USD)
-            .with_side(Side::Receive)
-            .with_start_date(ref_date)
-            .with_end_date(end_date)
-            .with_rate(rate)
-            .with_notional(1_000_000.0)
-            .with_discount_curve_id(Some(3))
-            .with_payment_frequency(Frequency::Annual) 
-            .bullet()
-            .build()?;
-
-        engine.add_instrument(3, end_date, Box::new(inst2))?;
-
-        let pricing_dates = relevant_pricing_dates(engine.instruments())?;
-        assert!(pricing_dates.contains_key(&1));
-        assert!(pricing_dates.contains_key(&3));
-        assert_eq!(pricing_dates[&1].len(), 2); 
-        assert_eq!(pricing_dates[&3].len(), 3); 
-        assert!(pricing_dates[&1].contains(&(ref_date + Period::new(1, TimeUnit::Years))));
-        assert!(pricing_dates[&3].contains(&(ref_date + Period::new(2, TimeUnit::Years))));
-        assert!(pricing_dates[&3].contains(&(ref_date + Period::new(1, TimeUnit::Years))));
-        assert!(pricing_dates[&3].contains(&ref_date));
-        assert!(pricing_dates[&3].contains(&ref_date));
-        Ok(())
-    }
 }

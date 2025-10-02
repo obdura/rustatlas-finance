@@ -1,12 +1,21 @@
 extern crate rustatlas;
 
 use rustatlas::{
-    cashflows::side::Side, currencies::enums::Currency, instruments::constructors::makefloatingrateinstrument::MakeFloatingRateInstrument, models::{simplemodel::SimpleModel, traits::Model}, rates::{interestrate::RateDefinition, traits::HasReferenceDate}, time::{
+    cashflows::side::Side,
+    currencies::enums::Currency,
+    instruments::constructors::makefloatingrateinstrument::MakeFloatingRateInstrument,
+    models::simplemodel::SimpleModel,
+    rates::{interestrate::RateDefinition, traits::HasReferenceDate},
+    time::{
         enums::{Frequency, TimeUnit},
         period::Period,
-    }, visitors::{
-       indexingvisitors::{fixingvisitor::FixingVisitor, indexingvisitor::IndexingVisitor}, npvvisitors::npvconstvisitor::NPVConstVisitor, parvaluevisitors::traits::ParValueConstVisitor, traits::{ConstVisit, HasCashflows, Visit}
-    }
+    },
+    visitors::{
+        fixingvisitor::fixingvisitor::FixingVisitor,
+        npvvisitors::npvconstvisitor::NPVConstVisitor,
+        parvaluevisitors::traits::ParValueConstVisitor,
+        traits::{ConstVisit, Visit},
+    },
 };
 
 mod common;
@@ -39,28 +48,18 @@ fn starting_today_pricing() {
         .build()
         .unwrap();
 
-    let indexer = IndexingVisitor::new();
-    let result = indexer.visit(&mut instrument);
-    match result {
-        Ok(_) => (),
-        Err(e) => panic!("IndexingVisitor failed with error: {}", e),
-    }
-
     let model = SimpleModel::new(&market_store);
-    let data = model.gen_market_data(&indexer.request()).unwrap();
 
-    let fixing_visitor = FixingVisitor::new(&data);
+    let fixing_visitor = FixingVisitor::new(&model);
     let _ = fixing_visitor.visit(&mut instrument);
 
-    print_table(instrument.cashflows_as_vec(), &data);
-
-    let npv_visitor = NPVConstVisitor::new(&data, true);
+    let npv_visitor = NPVConstVisitor::new(&model, true);
     let npv = npv_visitor.visit(&instrument);
 
     print_separator();
     println!("NPV: {}", npv.unwrap());
 
-    let par_visitor = ParValueConstVisitor::new(&data);
+    let par_visitor = ParValueConstVisitor::new(&model);
     let par_value = par_visitor.visit(&instrument).unwrap();
     println!("Par Value: {}", par_value);
 }
@@ -92,22 +91,12 @@ fn already_started_pricing() {
         .build()
         .unwrap();
 
-    let indexer = IndexingVisitor::new();
-    let result = indexer.visit(&mut instrument);
-    match result {
-        Ok(_) => (),
-        Err(e) => panic!("IndexingVisitor failed with error: {}", e),
-    }
-
     let model = SimpleModel::new(&market_store);
-    let data = model.gen_market_data(&indexer.request()).unwrap();
 
-    let fixing_visitor = FixingVisitor::new(&data);
+    let fixing_visitor = FixingVisitor::new(&model);
     let _ = fixing_visitor.visit(&mut instrument);
 
-    print_table(instrument.cashflows_as_vec(), &data);
-
-    let npv_visitor = NPVConstVisitor::new(&data, true);
+    let npv_visitor = NPVConstVisitor::new(&model, true);
     let npv = npv_visitor.visit(&instrument);
 
     print_separator();
