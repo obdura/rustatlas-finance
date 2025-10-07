@@ -426,9 +426,7 @@ pub enum CashflowType {
 
 #[cfg(test)]
 mod tests {
-
     use crate::cashflows::side::Side;
-
     use super::*;
 
     #[test]

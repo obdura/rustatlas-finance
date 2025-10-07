@@ -151,7 +151,7 @@ mod tests {
                 makefixedrateinstrument::MakeFixedRateInstrument,
                 makefloatingrateinstrument::MakeFloatingRateInstrument,
             },
-            forwards::fxforwards::FxForward,
+            forwards::fxforward::FxForward,
             loandepos::fixedrateinstrument::FixedRateInstrument,
         },
         models::simplemodel::SimpleModel,

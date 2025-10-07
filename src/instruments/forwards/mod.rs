@@ -1,1 +1,1 @@
-pub mod fxforwards;
+pub mod fxforward;

@@ -5,3 +5,5 @@ pub mod makedoublerateinstrument;
 pub mod makefloatingrateleg;
 pub mod makefixedratebond;
 pub mod traits;
+pub mod makevanillafxforward;
+pub mod makenondeliverablefxforward;
