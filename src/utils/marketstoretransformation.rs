@@ -37,16 +37,6 @@ pub struct TenorBasedValues {
     pub value: f64,
 }
 
-// impl From<(Period, f64)> for TenorBasedValues {
-//     fn from(tuple: (Period, f64)) -> Self {
-//         TenorBasedValues {
-//             tenor: tuple.0,
-//             value: tuple.1,
-//         }
-//     }
-// }
-
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CurveTransformations {
     pub apply_to: String,
