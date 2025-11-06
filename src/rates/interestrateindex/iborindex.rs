@@ -5,14 +5,11 @@ use crate::{
         traits::{HasReferenceDate, YieldProvider},
         yieldtermstructure::traits::YieldTermStructureTrait,
     }, time::{
-        date::Date,
-        enums::{Frequency, TimeUnit},
-        period::Period,
+        date::Date, daycounter::DayCounter, enums::{Frequency, TimeUnit}, period::Period
     }, utils::errors::{AtlasError, Result}
 };
 use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
+    collections::HashMap, sync::{Arc, RwLock}
 };
 
 use super::traits::{
@@ -86,9 +83,9 @@ impl IborIndex {
         self
     }
     
-    pub fn with_frequency(mut self, frequency: Frequency) -> Self {
-        self.tenor = Period::from_frequency(frequency).expect("Invalid frequency");
-        self
+    pub fn with_frequency(mut self, frequency: Frequency) -> Result<Self> {
+        self.tenor = Period::from_frequency(frequency).ok_or(AtlasError::InvalidValueErr(format!("Invalid frequency for ibor index ({})", frequency)))?;
+        Ok(self)
     }
 
     pub fn with_rate_definition(mut self, rate_definition: RateDefinition) -> Self {
@@ -172,12 +169,18 @@ impl YieldProvider for IborIndex {
         self.term_structure()?.discount_factor(date)
     }
 
+
+    fn discount_factor_between_dates(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        self.term_structure()?.discount_factor_between_dates(start_date, end_date)
+    }
+
     fn forward_rate(
         &self,
         start_date: Date,
         end_date: Date,
         comp: Compounding,
         freq: Frequency,
+        day_counter: DayCounter,
     ) -> Result<f64> {
         if end_date < start_date {
             return Err(AtlasError::InvalidValueErr(format!(
@@ -190,7 +193,7 @@ impl YieldProvider for IborIndex {
         } else {
             return self
                 .term_structure()?
-                .forward_rate(start_date, end_date, comp, freq);
+                .forward_rate(start_date, end_date, comp, freq, day_counter);
         }
     }
 }
@@ -237,6 +240,7 @@ impl AdvanceInterestRateIndexInTime for IborIndex {
                 seed + self.tenor,
                 self.rate_definition.compounding(),
                 self.rate_definition.frequency(),
+                self.rate_definition.day_counter(),
             )?;
             fixings.insert(seed, rate);
             seed = seed.advance(1, TimeUnit::Days);

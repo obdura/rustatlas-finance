@@ -37,6 +37,7 @@ pub struct MakeFloatingRateLeg {
     payment_frequency: Option<Frequency>,
     side: Option<Side>,
     currency: Option<Currency>,
+    pay_currency: Option<Currency>,
     notional: Option<f64>,
 
     structure: Option<Structure>,
@@ -73,6 +74,7 @@ impl MakeFloatingRateLeg {
             payment_frequency: None,
             side: None,
             currency: None,
+            pay_currency: None,
             notional: None,
             structure: None,
             rate_definition: None,
@@ -197,6 +199,11 @@ impl MakeFloatingRateLeg {
         return self;
     }
 
+    pub fn with_pay_currency(mut self, pay_currency: Currency) -> MakeFloatingRateLeg {
+        self.pay_currency = Some(pay_currency);
+        return self;
+    }
+
     pub fn with_spread(mut self, spread: f64) -> MakeFloatingRateLeg {
         self.spread = Some(spread);
         return self;
@@ -285,6 +292,10 @@ impl MakeFloatingRateLeg {
             .currency
             .ok_or(AtlasError::ValueNotSetErr("Currency".into()))?;
 
+        let pay_currency = self
+            .pay_currency
+            .unwrap_or(currency);
+
         // Default calendar to NullCalendar if not set
         let calendar = self
             .calendar
@@ -343,7 +354,7 @@ impl MakeFloatingRateLeg {
                 // make schedule for fixing dates
                 let mut schedule_builder =
                     MakeSchedule::new(adjusted_start_date, adjusted_end_date)
-                        .with_frequency(payment_frequency)
+                        .with_frequency(payment_frequency)?
                         .with_calendar(calendar.clone())
                         .with_convention(business_day_convention_fixing_dates)
                         .with_termination_date_convention(
@@ -357,7 +368,7 @@ impl MakeFloatingRateLeg {
                 // make schedule for accrual dates
                 let mut schedule_builder =
                     MakeSchedule::new(adjusted_start_date, adjusted_end_date)
-                        .with_frequency(payment_frequency)
+                        .with_frequency(payment_frequency)?
                         .with_calendar(calendar.clone())
                         .with_convention(business_day_convention)
                         .with_termination_date_convention(termination_business_day_convention)
@@ -397,6 +408,7 @@ impl MakeFloatingRateLeg {
                         &vec![notional],
                         side.inverse(),
                         currency,
+                        Some(pay_currency),
                         CashflowType::Disbursement,
                     );
                 }
@@ -408,6 +420,7 @@ impl MakeFloatingRateLeg {
                         &vec![notional],
                         side,
                         currency,
+                        Some(pay_currency), 
                         CashflowType::Redemption,
                     );
                 }
@@ -449,6 +462,7 @@ impl MakeFloatingRateLeg {
                     spread,
                     rate_definition,
                     currency,
+                    pay_currency,
                     side,
                     self.discount_curve_id,
                     self.forecast_curve_id,

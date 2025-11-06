@@ -148,8 +148,8 @@ impl FloatingRateInstrument {
 
     pub fn set_spread(mut self, spread: f64) -> Self {
         self.spread = spread;
-        self.mut_cashflows().for_each(|cf| match cf {
-            Cashflow::FloatingRateCoupon(coupon) => {
+        self.mut_cashflows().for_each(|ref mut cf| match cf {
+            Cashflow::FloatingRateCoupon(ref mut coupon) => {
                 coupon.set_spread(spread);
             }
             _ => {}

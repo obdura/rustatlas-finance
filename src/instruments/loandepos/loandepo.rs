@@ -52,6 +52,7 @@ pub struct LoanDepo {
     // pre-calculated fields
     pub notional_local_ccy: Option<f64>,
     pub outstanding: Option<f64>,
+    pub outstanding_recalculated: Option<f64>,
     pub outstanding_local_ccy: Option<f64>,
     pub readjustment_local_ccy: Option<f64>,
     pub avg_outstanding: Option<f64>,

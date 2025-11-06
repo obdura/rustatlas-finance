@@ -29,6 +29,7 @@ pub struct Leg {
     rate_value: f64,
     rate_definition: RateDefinition,
     currency: Currency,
+    pay_currency: Currency,
     side: Side,
     discount_curve_id: Option<usize>,
     forecast_curve_id: Option<usize>,
@@ -49,6 +50,7 @@ impl Leg {
         rate_value: f64,
         rate_definition: RateDefinition,
         currency: Currency,
+        pay_currency: Currency,
         side: Side,
         discount_curve_id: Option<usize>,
         forecast_curve_id: Option<usize>,
@@ -66,6 +68,7 @@ impl Leg {
             rate_value,
             rate_definition,
             currency,
+            pay_currency,
             side,
             discount_curve_id,
             forecast_curve_id,
@@ -118,6 +121,10 @@ impl Leg {
         self.currency
     }
 
+    pub fn pay_currency(&self) -> Currency {
+        self.pay_currency
+    }
+
     pub fn side(&self) -> Side {
         self.side
     }
@@ -140,11 +147,11 @@ impl Leg {
 
     pub fn set_rate_value(mut self, rate_value: f64) -> Self {
         self.rate_value = rate_value;
-        self.mut_cashflows().for_each(|cashflow| match cashflow {
-            Cashflow::FixedRateCoupon(coupon) => {
+        self.mut_cashflows().for_each(|ref mut cashflow| match cashflow {
+            Cashflow::FixedRateCoupon(ref mut coupon) => {
                 coupon.set_rate_value(rate_value);
             }
-            Cashflow::FloatingRateCoupon(coupon) => {
+            Cashflow::FloatingRateCoupon(ref mut coupon) => {
                 coupon.set_spread(rate_value);
             }
             _ => {}
@@ -177,9 +184,11 @@ impl InterestAccrual for Leg {
     fn accrual_start_date(&self) -> Result<Date> {
         Ok(self.start_date)
     }
+
     fn accrual_end_date(&self) -> Result<Date> {
         Ok(self.end_date)
     }
+
     fn accrued_amount(&self, start_date: Date, end_date: Date) -> Result<f64> {
         let total_accrued_amount = self.cashflows.iter().fold(0.0, |acc, cf| {
             acc + cf.accrued_amount(start_date, end_date).unwrap_or(0.0)
@@ -232,6 +241,12 @@ impl Display for Leg {
             "\t{} {}",
             "currency:".bold().magenta(),
             self.currency().to_string().cyan()
+        )?;
+        writeln!(
+            f,
+            "\t{} {}",
+            "pay_currency:".bold().magenta(),
+            self.pay_currency().to_string().cyan()
         )?;
         writeln!(
             f,
@@ -361,7 +376,7 @@ mod tests {
         let ibor_index = IborIndex::new(forecast_curve_1.reference_date())
             .with_fixings(ibor_fixings)
             .with_term_structure(forecast_curve_1)
-            .with_frequency(Frequency::Annual);
+            .with_frequency(Frequency::Annual)?;
 
         let overnight_fixings =
             make_fixings(ref_date - Period::new(1, TimeUnit::Years), ref_date, 0.06);

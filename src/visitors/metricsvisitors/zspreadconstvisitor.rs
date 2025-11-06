@@ -60,13 +60,7 @@ where
                 "Discount factor request not found"
             )))?;
         let df = self.model.gen_df_data(df_request)?;
-        let implied_df_rate = InterestRate::implied_rate(
-            1.0 / df,
-            self.rate_definition.day_counter(),
-            self.rate_definition.compounding(),
-            self.rate_definition.frequency(),
-            t,
-        )?;
+        let implied_df_rate = self.rate_definition.implied_rate(1.0 / df, t)?;
 
         let composite_rate = InterestRate::new(
             implied_df_rate.rate() + spread,
@@ -171,7 +165,7 @@ mod tests {
 
         let ibor_index = IborIndex::new(discount_curve.reference_date())
             .with_term_structure(discount_curve)
-            .with_frequency(Frequency::Semiannual);
+            .with_frequency(Frequency::Semiannual)?;
 
         market_store
             .mut_index_store()

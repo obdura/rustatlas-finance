@@ -9,6 +9,7 @@ use crate::{
     },
     time::{
         date::Date,
+        daycounter::DayCounter,
         enums::{Frequency, TimeUnit},
         period::Period,
     },
@@ -23,7 +24,7 @@ use super::traits::{AdvanceTermStructureInTime, YieldTermStructureTrait};
 ///
 /// ## Forward Rate
 /// The forward rate is calculated a the rate between reference date and the (start_date + tenor)
-/// 
+///
 /// ## Parameters
 /// * `reference_date` - The reference date of the term structure
 /// * `tenors` - The tenors of the term structure
@@ -68,7 +69,7 @@ impl TenorBasedZeroRateTermStructure {
             rate_definition,
             year_fractions,
             interpolation,
-            enable_extrapolation, 
+            enable_extrapolation,
         })
     }
 
@@ -104,32 +105,25 @@ impl YieldProvider for TenorBasedZeroRateTermStructure {
         Ok(1.0 / rate.compound_factor(self.reference_date, date))
     }
 
+    fn discount_factor_between_dates(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        let days = (end_date - start_date) as i32;
+        let eval_date = self.reference_date + Period::new(days, TimeUnit::Days);
+        let eval_date_df = self.discount_factor(eval_date)?;
+        Ok(eval_date_df)
+    }
+
     fn forward_rate(
         &self,
         start_date: Date,
         end_date: Date,
         comp: Compounding,
         freq: Frequency,
+        day_counter: DayCounter,
     ) -> Result<f64> {
-        let days = (end_date - start_date) as i32;
-        let eval_date = self.reference_date + Period::new(days, TimeUnit::Days);
-
-        let eval_date_df = self.discount_factor(eval_date)?;
-
-        let compound = 1.0 / eval_date_df;
-        let t: f64 = self
-            .rate_definition
-            .day_counter()
-            .year_fraction(start_date, end_date);
-
-        let rate = InterestRate::implied_rate(
-            compound,
-            self.rate_definition.day_counter(),
-            comp,
-            freq,
-            t,
-        )?;
-        Ok(rate.rate())
+        let compound = 1.0 / self.discount_factor_between_dates(start_date, end_date)?;
+        let rate_definition = RateDefinition::new(day_counter, comp, freq);
+        let yf = day_counter.year_fraction(start_date, end_date);
+        Ok(rate_definition.implied_rate(compound, yf)?.rate())
     }
 }
 
@@ -157,17 +151,24 @@ impl YieldTermStructureTrait for TenorBasedZeroRateTermStructure {}
 
 #[cfg(test)]
 mod tests {
-    
-
     use crate::{
-        math::interpolation::enums::Interpolator, rates::{
-            enums::Compounding, interestrate::RateDefinition, traits::YieldProvider,
-            yieldtermstructure::{tenorbasedzeroratetermstructure::TenorBasedZeroRateTermStructure, traits::AdvanceTermStructureInTime},
-        }, time::{
+        math::interpolation::enums::Interpolator,
+        rates::{
+            enums::Compounding,
+            interestrate::RateDefinition,
+            traits::YieldProvider,
+            yieldtermstructure::{
+                tenorbasedzeroratetermstructure::TenorBasedZeroRateTermStructure,
+                traits::AdvanceTermStructureInTime,
+            },
+        },
+        time::{
             date::Date,
+            daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }, utils::errors::Result
+        },
+        utils::errors::Result,
     };
 
     #[test]
@@ -201,6 +202,7 @@ mod tests {
                     reference_date + Period::new(*x, TimeUnit::Years),
                     Compounding::Compounded,
                     Frequency::Annual,
+                    DayCounter::Actual360,
                 )
                 .unwrap();
             let tmp = *x as f64;
@@ -218,7 +220,7 @@ mod tests {
         let interpolation = Interpolator::Linear;
         let enable_extrapolation = true;
 
-        let days  = vec![1*360, 2*360, 3*360, 4*360, 5*360];
+        let days = vec![1 * 360, 2 * 360, 3 * 360, 4 * 360, 5 * 360];
         let spreads = vec![0.01, 0.02, 0.03, 0.04, 0.05];
         let tenors = days
             .iter()
@@ -234,26 +236,32 @@ mod tests {
             enable_extrapolation,
         )?;
 
-        
         let delta = Period::new(360, TimeUnit::Days);
 
-        let  df = zero_rate_term_structure.discount_factor(reference_date + delta)?;
-        let rate    = zero_rate_term_structure.forward_rate(reference_date, 
-                                                reference_date + delta,  
-                                                    Compounding::Simple,
-                                                    Frequency::Annual)?;
+        let df = zero_rate_term_structure.discount_factor(reference_date + delta)?;
+        let rate = zero_rate_term_structure.forward_rate(
+            reference_date,
+            reference_date + delta,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        )?;
 
-        let new_term_structure = zero_rate_term_structure.advance_to_period(Period::new(500, TimeUnit::Days))?;
+        let new_term_structure =
+            zero_rate_term_structure.advance_to_period(Period::new(500, TimeUnit::Days))?;
         let new_reference_date = new_term_structure.reference_date();
         let new_df = new_term_structure.discount_factor(new_reference_date + delta)?;
-        let new_rate    = new_term_structure.forward_rate(new_reference_date, 
-                                            new_reference_date + delta,  
-                                                Compounding::Simple,
-                                                Frequency::Annual)?;
+        let new_rate = new_term_structure.forward_rate(
+            new_reference_date,
+            new_reference_date + delta,
+            Compounding::Simple,
+            Frequency::Annual,
+            DayCounter::Actual360,
+        )?;
 
         assert!((rate - new_rate).abs() < 1e-6);
         assert!((df - new_df).abs() < 1e-6);
-        
+
         Ok(())
     }
 
@@ -265,7 +273,7 @@ mod tests {
         let interpolation = Interpolator::Linear;
         let enable_extrapolation = true;
 
-        let days  = vec![1*360, 2*360, 3*360, 4*360, 5*360];
+        let days = vec![1 * 360, 2 * 360, 3 * 360, 4 * 360, 5 * 360];
         let spreads = vec![0.01, 0.02, 0.03, 0.04, 0.05];
         let tenors = days
             .iter()
@@ -287,6 +295,7 @@ mod tests {
                 reference_date + Period::new(360, TimeUnit::Days),
                 Compounding::Simple,
                 Frequency::Annual,
+                DayCounter::Actual360,
             )
             .unwrap();
 
@@ -297,11 +306,53 @@ mod tests {
                 tem_date + Period::new(360, TimeUnit::Days),
                 Compounding::Simple,
                 Frequency::Annual,
+                DayCounter::Actual360,
             )
             .unwrap();
 
         assert!((forward_rate - new_forward_rate).abs() < 1e-6);
         Ok(())
     }
-}
 
+    #[test]
+    fn test_zero_rate_forward_rate_2() -> Result<()> {
+        let date = Date::new(2021, 3, 21);
+        let rate_definition = RateDefinition::default();
+
+        let tenors = vec![
+            Period::new(0, TimeUnit::Years),
+            Period::new(1, TimeUnit::Years),
+            Period::new(2, TimeUnit::Years),
+            Period::new(3, TimeUnit::Years),
+            Period::new(4, TimeUnit::Years),
+            Period::new(5, TimeUnit::Years),
+        ];
+        let spreads = vec![0.001, 0.01, 0.02, 0.03, 0.04, 0.05];
+
+        let zero_rate_term_structure = TenorBasedZeroRateTermStructure::new(
+            date,
+            tenors,
+            spreads,
+            rate_definition,
+            Interpolator::Linear,
+            true,
+        )?;
+
+        let fwd_start = date + Period::new(1, TimeUnit::Years);
+        let fwd_end = date + Period::new(2, TimeUnit::Years);
+
+        let rate = zero_rate_term_structure
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
+            .unwrap();
+
+        println!("Rate: {:?}", rate);
+
+        Ok(())
+    }
+}

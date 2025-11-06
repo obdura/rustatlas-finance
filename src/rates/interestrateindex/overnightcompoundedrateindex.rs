@@ -10,9 +10,7 @@ use crate::{
         traits::{HasReferenceDate, YieldProvider},
         yieldtermstructure::traits::YieldTermStructureTrait,
     }, time::{
-        date::Date,
-        enums::{Frequency, TimeUnit},
-        period::Period,
+        date::Date, daycounter::DayCounter, enums::{Frequency, TimeUnit}, period::Period
     }, utils::errors::{AtlasError, Result}
 };
 
@@ -144,14 +142,19 @@ impl YieldProvider for OvernightCompoundedRateIndex {
         self.overnight_index.discount_factor(date)
     }
 
+    fn discount_factor_between_dates(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        self.overnight_index.discount_factor_between_dates(start_date, end_date)
+    }
+
     fn forward_rate(
         &self,
         start_date: Date,
         end_date: Date,
         comp: Compounding,
         freq: Frequency,
+        day_counter: DayCounter,
     ) -> Result<f64> {
-        self.overnight_index.forward_rate(start_date, end_date, comp, freq)
+        self.overnight_index.forward_rate(start_date, end_date, comp, freq, day_counter)
     }
 }
 

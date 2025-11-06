@@ -335,7 +335,7 @@ impl MakeFixedRateInstrument {
                 // this logic should go into a separate function/ Schedule should have accessing methods
                 // to first and last date and other attributes
                 let mut schedule_builder = MakeSchedule::new(start_date, end_date)
-                    .with_frequency(payment_frequency)
+                    .with_frequency(payment_frequency)?
                     .with_calendar(
                         self.calendar
                             .unwrap_or(Calendar::NullCalendar(NullCalendar::new())),
@@ -378,6 +378,7 @@ impl MakeFixedRateInstrument {
                     &vec![notional],
                     side.inverse(),
                     currency,
+                    None,
                     CashflowType::Disbursement,
                 );
                 build_coupons_from_notionals(
@@ -394,6 +395,7 @@ impl MakeFixedRateInstrument {
                     &vec![notional],
                     side,
                     currency,
+                    None,
                     CashflowType::Redemption,
                 );
 
@@ -527,7 +529,7 @@ impl MakeFixedRateInstrument {
                     }
                     None => {
                         let mut schedule_builder = MakeSchedule::new(start_date, end_date)
-                            .with_frequency(payment_frequency)
+                            .with_frequency(payment_frequency)?
                             .with_calendar(
                                 self.calendar
                                     .unwrap_or(Calendar::NullCalendar(NullCalendar::new())),
@@ -588,6 +590,7 @@ impl MakeFixedRateInstrument {
                     &vec![notional],
                     side.inverse(),
                     currency,
+                    None,
                     CashflowType::Disbursement,
                 );
 
@@ -616,6 +619,7 @@ impl MakeFixedRateInstrument {
                     &redemptions,
                     side,
                     currency,
+                    None,
                     CashflowType::Redemption,
                 );
 
@@ -626,6 +630,7 @@ impl MakeFixedRateInstrument {
                         &disbursements,
                         side.inverse(),
                         currency,
+                        None,
                         CashflowType::Disbursement,
                     );
                 }
@@ -669,7 +674,7 @@ impl MakeFixedRateInstrument {
                     }
                 };
                 let schedule = MakeSchedule::new(start_date, end_date)
-                    .with_frequency(payment_frequency)
+                    .with_frequency(payment_frequency)?
                     .with_convention(
                         self.business_day_convention
                             .unwrap_or(BusinessDayConvention::Unadjusted),
@@ -701,6 +706,7 @@ impl MakeFixedRateInstrument {
                     &vec![notional],
                     side.inverse(),
                     currency,
+                    None,
                     CashflowType::Disbursement,
                 );
                 build_coupons_from_notionals(
@@ -717,6 +723,7 @@ impl MakeFixedRateInstrument {
                     &vec![notional],
                     side,
                     currency,
+                    None,
                     CashflowType::Redemption,
                 );
 
@@ -756,7 +763,7 @@ impl MakeFixedRateInstrument {
                     }
                 };
                 let mut schedule_builder = MakeSchedule::new(start_date, end_date)
-                    .with_frequency(payment_frequency)
+                    .with_frequency(payment_frequency)?
                     .with_convention(
                         self.business_day_convention
                             .unwrap_or(BusinessDayConvention::Unadjusted),
@@ -800,6 +807,7 @@ impl MakeFixedRateInstrument {
                     &vec![notional],
                     side.inverse(),
                     currency,
+                    None,
                     CashflowType::Disbursement,
                 );
 
@@ -821,6 +829,7 @@ impl MakeFixedRateInstrument {
                     &redemptions,
                     side,
                     currency,
+                    None,
                     CashflowType::Redemption,
                 );
 

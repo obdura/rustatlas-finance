@@ -5,3 +5,4 @@ pub mod tenorbasedzeroratetermstructure;
 pub mod traits;
 pub mod zeroratetermstructure;
 pub mod tenorbasedspreadtermstructure;
+pub mod synthetictermstructure;

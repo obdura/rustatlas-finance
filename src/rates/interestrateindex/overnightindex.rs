@@ -7,14 +7,12 @@ use crate::{
     currencies::enums::Currency,
     rates::{
         enums::Compounding,
-        interestrate::{InterestRate, RateDefinition},
+        interestrate::RateDefinition,
         traits::{HasReferenceDate, YieldProvider},
         yieldtermstructure::traits::YieldTermStructureTrait,
     },
     time::{
-        date::Date,
-        enums::{Frequency, TimeUnit},
-        period::Period,
+        date::Date, daycounter::DayCounter, enums::{Frequency, TimeUnit}, period::Period
     },
     utils::errors::{AtlasError, Result},
 };
@@ -94,15 +92,8 @@ impl OvernightIndex {
         let end_index = self.fixing(end_date)?;
 
         let comp = end_index / start_index;
-        let day_counter = self.rate_definition.day_counter();
-        Ok(InterestRate::implied_rate(
-            comp,
-            day_counter,
-            self.rate_definition.compounding(),
-            self.rate_definition.frequency(),
-            day_counter.year_fraction(start_date, end_date),
-        )?
-        .rate())
+        let rate = self.rate_definition.implied_rate_from_dates(start_date, end_date, comp)?;
+        return Ok(rate.rate());
     }
 }
 
@@ -168,12 +159,17 @@ impl YieldProvider for OvernightIndex {
         self.term_structure()?.discount_factor(date)
     }
 
+    fn discount_factor_between_dates(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        self.term_structure()?.discount_factor_between_dates(start_date, end_date)
+    }
+
     fn forward_rate(
         &self,
         start_date: Date,
         end_date: Date,
         comp: Compounding,
         freq: Frequency,
+        day_counter: DayCounter,
     ) -> Result<f64> {
         // mixed case - return w.a.
         if start_date < self.reference_date() && end_date > self.reference_date() {
@@ -184,16 +180,10 @@ impl YieldProvider for OvernightIndex {
 
             let third_fixing = second_fixing / df;
 
-            let comp = third_fixing / first_fixing;
-            let day_counter = self.rate_definition.day_counter();
-            return Ok(InterestRate::implied_rate(
-                comp,
-                day_counter,
-                self.rate_definition.compounding(),
-                self.rate_definition.frequency(),
-                day_counter.year_fraction(start_date, end_date),
-            )?
-            .rate());
+            let compounding= third_fixing / first_fixing;
+            let rate_definition = RateDefinition::new(day_counter, comp, freq);
+            let yf = day_counter.year_fraction(start_date, end_date);
+            return Ok(rate_definition.implied_rate(compounding, yf)?.rate());
         }
 
         // past fixing case
@@ -204,7 +194,7 @@ impl YieldProvider for OvernightIndex {
         // forecast case
         if start_date >= self.reference_date() && end_date > self.reference_date() {
             self.term_structure()?
-                .forward_rate(start_date, end_date, comp, freq)
+                .forward_rate(start_date, end_date, comp, freq, day_counter)
         } else {
             Err(AtlasError::InvalidValueErr(format!(
                 "Invalid dates: start_date: {:?}, end_date: {:?}",

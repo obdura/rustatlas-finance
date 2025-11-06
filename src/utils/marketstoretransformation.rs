@@ -24,11 +24,11 @@ use crate::{
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum TransformationType {
-    ParallelShift,    // apply a parallel shift to the curve -- shift is derived in forward rates -- forwards rate = fwr(base_curve + shift)
+    ParallelShift, // apply a parallel shift to the curve -- shift is derived in forward rates -- forwards rate = fwr(base_curve + shift)
     TenorBasedShift, // apply a shift to the curve based using a tenor based term structure -- shift is derived in forward rates -- forwards rate = fwr(base_curve + shift)
-    BaseAndSpread,   // overwrite the curve using a base curve and a given spread curve -- spread is not derived in forward rates -- forwards rate = fwr(base_curve) + spread_curve
+    BaseAndSpread, // overwrite the curve using a base curve and a given spread curve -- spread is not derived in forward rates -- forwards rate = fwr(base_curve) + spread_curve
     ImplicitBaseAndSpread, // overwrite the curve using a two curves -- base curve and spread + base curve -- spread is not derived in forward rates -- forwards rate = fwr(base_curve) + spread_curve
-    NewCurveAndSpread,    // create a new curve using a base curve and a spread curve -- spread is not derived iq  n forward rates -- forwards rate = fwr(base_curve) + spread_curve
+    NewCurveAndSpread, // create a new curve using a base curve and a spread curve -- spread is not derived in forward rates -- forwards rate = fwr(base_curve) + spread_curve
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -36,6 +36,15 @@ pub struct TenorBasedValues {
     pub tenor: Period,
     pub value: f64,
 }
+
+// impl From<(Period, f64)> for TenorBasedValues {
+//     fn from(tuple: (Period, f64)) -> Self {
+//         TenorBasedValues {
+//             tenor: tuple.0,
+//             value: tuple.1,
+//         }
+//     }
+// }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CurveTransformations {
@@ -423,8 +432,8 @@ pub fn apply_curve_transformations(
                     )?);
 
                     let composite = Arc::new(CompositeTermStructure::new(
-                        base_term_structure,
                         spread_term_structure,
+                        base_term_structure,
                     ));
 
                     new_market_store
@@ -456,11 +465,13 @@ mod tests {
             traits::{HasReferenceDate, YieldProvider},
             yieldtermstructure::{
                 flatforwardtermstructure::FlatForwardTermStructure,
+                tenorbasedzeroratetermstructure::TenorBasedZeroRateTermStructure,
                 zeroratetermstructure::ZeroRateTermStructure,
             },
         },
         time::{
             date::Date,
+            daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
         },
@@ -526,7 +537,7 @@ mod tests {
         let ibor_index = IborIndex::new(forecast_curve_1.reference_date())
             .with_fixings(ibor_fixings)
             .with_term_structure(forecast_curve_1)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_name(Some("ICP".to_string()));
 
         market_store
@@ -548,7 +559,7 @@ mod tests {
 
         let discount_index = IborIndex::new(discount_curve.reference_date())
             .with_term_structure(discount_curve)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_name(Some("discount_index".to_string()));
 
         market_store
@@ -557,7 +568,7 @@ mod tests {
 
         let zero_index = IborIndex::new(zero_rate.reference_date())
             .with_term_structure(zero_rate)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_name(Some("zero_index".to_string()));
 
         market_store
@@ -566,7 +577,7 @@ mod tests {
 
         let zero_index_spread = IborIndex::new(zero_rate_base.reference_date())
             .with_term_structure(zero_rate_base)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_name(Some("zero_index_base".to_string()));
 
         market_store
@@ -592,7 +603,13 @@ mod tests {
         let fwd_end = market_store.reference_date() + Period::new(1, TimeUnit::Years);
 
         let rate = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         let transformations = vec![CurveTransformations {
@@ -614,13 +631,24 @@ mod tests {
 
         let term_structure = index.read_index().unwrap().term_structure().unwrap();
         let second_rate = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         println!("Rate: {:?}", rate);
         println!("Second Rate: {:?}", second_rate);
-
-        assert!((rate + second_rate - 0.05).abs() < 0.00001);
+        assert!(
+            (second_rate
+                - (((1.0 + 0.02 * 365.0 / 360.0) * (1.0 + 0.01 * 365.0 / 360.0)) - 1.0) * 360.0
+                    / 365.0)
+                .abs()
+                < 0.00001
+        );
 
         let first_curve_map = market_store.index_store().get_index_map().unwrap();
         let second_curve_map = new_market_store.index_store().get_index_map().unwrap();
@@ -633,6 +661,7 @@ mod tests {
 
         Ok(())
     }
+
     #[test]
     fn test_apply_curve_transformations_to_one() -> Result<()> {
         let date = Date::new(2024, 3, 21);
@@ -657,7 +686,13 @@ mod tests {
         let fwd_start = market_store.reference_date();
         let fwd_end = market_store.reference_date() + Period::new(1, TimeUnit::Years);
         let rate = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         let new_market_store = apply_curve_transformations(&market_store, transformations).unwrap();
@@ -668,7 +703,13 @@ mod tests {
             .unwrap();
         let term_structure = index.read_index().unwrap().term_structure().unwrap();
         let second_rate = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         println!("Rate: {:?}", rate);
@@ -701,10 +742,23 @@ mod tests {
         let term_structure = index.read_index().unwrap().term_structure().unwrap();
         let fwd_start = market_store.reference_date() + Period::new(1, TimeUnit::Years);
         let fwd_end = market_store.reference_date() + Period::new(2, TimeUnit::Years);
-        let rate_1 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
-            .unwrap();
 
+        let rate_1 = term_structure
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
+            .unwrap();
+        assert!(
+            (rate_1
+                - (((1.0 + 0.02 * 730.0 / 360.0) / (1.0 + 0.02 * 365.0 / 360.0) - 1.0) * 360.0
+                    / 365.0))
+                .abs()
+                < 0.000001
+        );
         println!("Rate 1: {:?}", rate_1);
 
         let mut spread_term = Vec::new();
@@ -733,10 +787,37 @@ mod tests {
             value: 0.05 as f64,
         });
 
+        let (tenors, spread_values) = spread_term
+            .iter()
+            .map(|v| (v.tenor.clone(), v.value))
+            .unzip();
+
+        let spread_term_structure = TenorBasedZeroRateTermStructure::new(
+            market_store.reference_date(),
+            tenors,
+            spread_values,
+            RateDefinition::default(),
+            Interpolator::Linear,
+            true,
+        )?;
+
+        let rate_2 = spread_term_structure
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
+            .unwrap();
+
+        assert!((rate_2 - 0.01).abs() < 0.000001);
+        println!("Rate 2: {:?}", rate_2);
+
         let transformations = vec![CurveTransformations {
             apply_to: "ICP_new".to_string(),
             transformation_type: TransformationType::NewCurveAndSpread,
-            shift_value: Some(0.01),
+            shift_value: None,
             rate_definition: RateDefinition::default(),
             shift_term_structure: None,
             base_term_structure: Some("ICP".to_string()),
@@ -744,7 +825,6 @@ mod tests {
         }];
 
         let new_market_store = apply_curve_transformations(&market_store, transformations).unwrap();
-
         let index = new_market_store
             .index_store()
             .get_index_by_name("ICP_new".to_string())
@@ -753,13 +833,23 @@ mod tests {
         let term_structure = index.read_index().unwrap().term_structure().unwrap();
         let fwd_start = market_store.reference_date() + Period::new(1, TimeUnit::Years);
         let fwd_end = market_store.reference_date() + Period::new(2, TimeUnit::Years);
-        let rate_2 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+        let rate_3 = term_structure
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
-        println!("Rate 2: {:?}", rate_2);
-
-        assert!((rate_1 + 0.01 - rate_2).abs() < 0.0000001);
+        println!("Rate 3: {:?}", rate_3);
+        assert!(
+            (rate_3
+                - ((1.0 + rate_1 * 365.0 / 360.0) * (1.0 + rate_2 * 365.0 / 360.0) - 1.0) * 360.0
+                    / 365.0)
+                < 0.000001
+        );
 
         Ok(())
     }
@@ -778,7 +868,13 @@ mod tests {
         let fwd_start = market_store.reference_date();
         let fwd_end = market_store.reference_date() + Period::new(1, TimeUnit::Years);
         let rate_1 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         assert!((rate_1 - 0.03).abs() < 0.0000001);
@@ -786,7 +882,13 @@ mod tests {
         let fwd_start = market_store.reference_date() + Period::new(1, TimeUnit::Years);
         let fwd_end = market_store.reference_date() + Period::new(2, TimeUnit::Years);
         let rate_2 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         assert!((rate_2 - 0.04852405984634041).abs() < 0.0000001);
@@ -812,7 +914,13 @@ mod tests {
         let fwd_start = market_store.reference_date();
         let fwd_end = market_store.reference_date() + Period::new(1, TimeUnit::Years);
         let rate_1 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         assert!((rate_1 - 0.03).abs() < 0.0000001);
@@ -820,10 +928,17 @@ mod tests {
         let fwd_start = market_store.reference_date() + Period::new(1, TimeUnit::Years);
         let fwd_end = market_store.reference_date() + Period::new(2, TimeUnit::Years);
         let rate_2 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
-        assert!((rate_2 - 0.04920500952899519).abs() < 0.0000001);
+        println!("Rate 2: {:?}", rate_2);
+        assert!((rate_2 - 0.04939585702363403).abs() < 0.0000001);
 
         Ok(())
     }
@@ -842,15 +957,27 @@ mod tests {
             .unwrap();
         let term_structure = index.read_index().unwrap().term_structure().unwrap();
         let fwd_rate_1: f64 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
-        print!("fwd Rate 1: {:?}", fwd_rate_1);
+        println!("fwd Rate 1: {:?}", fwd_rate_1);
 
         let flat_rate_index = FlatForwardTermStructure::new(date, 0.01, RateDefinition::default());
 
         let fwd_rate_2 = flat_rate_index
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
         println!("fwd Rate 2: {:?}", fwd_rate_2);
 
@@ -872,12 +999,18 @@ mod tests {
 
         let term_structure = index.read_index().unwrap().term_structure().unwrap();
         let fwd_rate_3 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
-
         println!("fwd Rate 3: {:?}", fwd_rate_3);
-        assert!((fwd_rate_1 + fwd_rate_2 - fwd_rate_3).abs() < 0.0000001);
-
+        let yf = (fwd_end - fwd_start) as f64 / 360.0;
+        let rate_tmp = ((1.0 + fwd_rate_1 * yf) * (1.0 + fwd_rate_2 * yf) - 1.0) / yf;
+        assert!((fwd_rate_3 - rate_tmp).abs() < 0.0000001);
         Ok(())
     }
 
@@ -895,7 +1028,13 @@ mod tests {
             .unwrap();
         let term_structure = index.read_index().unwrap().term_structure().unwrap();
         let fwd_rate_1: f64 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         print!("fwd Rate 1: {:?}", fwd_rate_1);
@@ -903,7 +1042,13 @@ mod tests {
         let flat_rate_index = FlatForwardTermStructure::new(date, 0.01, RateDefinition::default());
 
         let fwd_rate_2 = flat_rate_index
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
         println!("fwd Rate 2: {:?}", fwd_rate_2);
 
@@ -936,11 +1081,22 @@ mod tests {
 
         let term_structure = index.read_index().unwrap().term_structure().unwrap();
         let fwd_rate_3 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         println!("fwd Rate 3: {:?}", fwd_rate_3);
-        assert!((fwd_rate_1 + 2.0 * fwd_rate_2 - fwd_rate_3).abs() < 0.0000001);
+
+        let yf = (fwd_end - fwd_start) as f64 / 360.0;
+        let rate_tmp =
+            ((1.0 + fwd_rate_1 * yf) * (1.0 + fwd_rate_2 * yf) * (1.0 + fwd_rate_2 * yf) - 1.0)
+                / yf;
+        assert!((fwd_rate_3 - rate_tmp).abs() < 0.0000001);
 
         Ok(())
     }
@@ -959,9 +1115,22 @@ mod tests {
         let fwd_start = market_store.reference_date() + Period::new(1, TimeUnit::Years);
         let fwd_end = market_store.reference_date() + Period::new(2, TimeUnit::Years);
         let rate_1 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
+        assert!(
+            (rate_1
+                - (((1.0 + 0.02 * 730.0 / 360.0) / (1.0 + 0.02 * 365.0 / 360.0) - 1.0) * 360.0
+                    / 365.0))
+                .abs()
+                < 0.000001
+        );
         println!("Rate 1: {:?}", rate_1);
 
         let mut spread_term = Vec::new();
@@ -994,7 +1163,7 @@ mod tests {
             CurveTransformations {
                 apply_to: "ICP_new".to_string(),
                 transformation_type: TransformationType::NewCurveAndSpread,
-                shift_value: Some(0.01),
+                shift_value: None,
                 rate_definition: RateDefinition::default(),
                 shift_term_structure: None,
                 base_term_structure: Some("ICP".to_string()),
@@ -1012,7 +1181,6 @@ mod tests {
         ];
 
         let new_market_store = apply_curve_transformations(&market_store, transformations).unwrap();
-
         let index = new_market_store
             .index_store()
             .get_index_by_name("ICP_new".to_string())
@@ -1022,11 +1190,27 @@ mod tests {
         let fwd_start = market_store.reference_date() + Period::new(1, TimeUnit::Years);
         let fwd_end = market_store.reference_date() + Period::new(2, TimeUnit::Years);
         let rate_2 = term_structure
-            .forward_rate(fwd_start, fwd_end, Compounding::Simple, Frequency::Annual)
+            .forward_rate(
+                fwd_start,
+                fwd_end,
+                Compounding::Simple,
+                Frequency::Annual,
+                DayCounter::Actual360,
+            )
             .unwrap();
 
         println!("Rate 2: {:?}", rate_2);
-        assert!((rate_1 + 0.02960250476 - rate_2).abs() < 0.0000001);
+        let yf_aux = (fwd_end - fwd_start) as f64 / 360.0;
+        let flat_rate =
+            ((1.0 + 0.02 * 730.0 / 360.0) / (1.0 + 0.02 * 365.0 / 360.0) - 1.0) * 360.0 / 365.0;
+        let rate_tmp = ((1.0_f64 + 0.01_f64 * yf_aux)
+            * (1.0_f64 + rate_1 * yf_aux)
+            * (1.0_f64 + flat_rate * yf_aux)
+            - 1.0)
+            / yf_aux;
+        println!("Rate tmp: {:?}", rate_tmp);
+
+        assert!((rate_tmp - rate_2).abs() < 0.000001);
 
         Ok(())
     }
@@ -1050,7 +1234,8 @@ mod tests {
             ]
         }"#;
 
-        let transformations: std::result::Result<CurveTransformations, serde_json::Error> = serde_json::from_str(string);
+        let transformations: std::result::Result<CurveTransformations, serde_json::Error> =
+            serde_json::from_str(string);
         assert!(transformations.is_ok());
         Ok(())
     }
@@ -1072,9 +1257,12 @@ mod tests {
             ]
         }"#;
 
-        let transformations: std::result::Result<CurveTransformations, serde_json::Error> = serde_json::from_str(string);
+        let transformations: std::result::Result<CurveTransformations, serde_json::Error> =
+            serde_json::from_str(string);
         assert!(transformations.is_ok());
-        transformations.unwrap().spread_term_structure
+        transformations
+            .unwrap()
+            .spread_term_structure
             .unwrap()
             .iter()
             .for_each(|v| println!("{:?}", v));
@@ -1188,7 +1376,8 @@ mod tests {
             }
         ]"#;
 
-        let transformations: std::result::Result<Vec<CurveTransformations>, serde_json::Error> = serde_json::from_str(string);
+        let transformations: std::result::Result<Vec<CurveTransformations>, serde_json::Error> =
+            serde_json::from_str(string);
         assert!(transformations.is_ok());
         Ok(())
     }

@@ -75,6 +75,10 @@ impl MarketStore {
         self.local_currency
     }
 
+    pub fn set_local_currency(&mut self, local_currency: Currency) {
+        self.local_currency = local_currency;
+    }
+
     pub fn exchange_rate_store(&self) -> &ExchangeRateStore {
         &self.exchange_rate_store
     }

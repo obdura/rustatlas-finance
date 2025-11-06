@@ -1,18 +1,13 @@
 use std::sync::Arc;
-
 use crate::{
     rates::{
-        enums::Compounding,
-        traits::{HasReferenceDate, YieldProvider},
+        enums::Compounding, interestrate::RateDefinition, traits::{HasReferenceDate, YieldProvider}
     },
     time::{
-        date::Date,
-        enums::{Frequency, TimeUnit},
-        period::Period,
+        date::Date, daycounter::DayCounter, enums::{Frequency, TimeUnit}, period::Period
     },
     utils::errors::Result,
 };
-
 use super::traits::{AdvanceTermStructureInTime, YieldTermStructureTrait};
 
 /// # TenorBasedSpreadRateTermStructure
@@ -22,6 +17,7 @@ use super::traits::{AdvanceTermStructureInTime, YieldTermStructureTrait};
 /// Here the forward rate have dependency on the tenor
 ///
 /// ## Forward Rate
+/// 
 /// The forward rate is calculated a the rate between reference date and the (start_date + tenor)
 ///
 
@@ -79,13 +75,28 @@ impl HasReferenceDate for TenorBasedSpreadRateTermStructure {
 impl YieldProvider for TenorBasedSpreadRateTermStructure {
     fn discount_factor(&self, date: Date) -> Result<f64> {
         let days = (date - self.date_reference) as i32;
+
+        let eval_date_spread = self.spread_curve().reference_date() + Period::new(days, TimeUnit::Days);
+        let spread_discount_factor = self.spread_curve.discount_factor(eval_date_spread)?;
+        
+        let eval_date_base = self.base_curve().reference_date() + Period::new(days, TimeUnit::Days);
+        let base_discount_factor = self.base_curve.discount_factor(eval_date_base)?;
+        
+        let df = spread_discount_factor / base_discount_factor;
+        return Ok(df);
+    }
+
+    fn discount_factor_between_dates(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        let days = (end_date - start_date) as i32;
         let eval_date_spread =
             self.spread_curve().reference_date() + Period::new(days, TimeUnit::Days);
         let spread_discount_factor = self.spread_curve.discount_factor(eval_date_spread)?;
+        
         let eval_date_base = self.base_curve().reference_date() + Period::new(days, TimeUnit::Days);
         let base_discount_factor = self.base_curve.discount_factor(eval_date_base)?;
-        let add_df = spread_discount_factor / base_discount_factor;
-        return Ok(add_df);
+        
+        let df = spread_discount_factor / base_discount_factor;
+        return Ok(df);
     }
 
     fn forward_rate(
@@ -94,25 +105,12 @@ impl YieldProvider for TenorBasedSpreadRateTermStructure {
         end_date: Date,
         comp: Compounding,
         freq: Frequency,
+        day_counter: DayCounter,
     ) -> Result<f64> {
-        let days = (end_date - start_date) as i32;
-        let eval_date_spread =
-            self.spread_curve().reference_date() + Period::new(days, TimeUnit::Days);
-        let spread_forward_rate = self.spread_curve.forward_rate(
-            self.spread_curve().reference_date(),
-            eval_date_spread,
-            comp,
-            freq,
-        )?;
-
-        let eval_date_base = self.base_curve().reference_date() + Period::new(days, TimeUnit::Days);
-        let base_forward_rate = self.base_curve.forward_rate(
-            self.base_curve().reference_date(),
-            eval_date_base,
-            comp,
-            freq,
-        )?;
-        return Ok(spread_forward_rate - base_forward_rate);
+        let rate_definition = RateDefinition::new(day_counter, comp, freq);
+        let yf = day_counter.year_fraction(start_date, end_date);
+        let comp_factor = 1.0 / self.discount_factor_between_dates(start_date, end_date)?;
+        return Ok(rate_definition.implied_rate(comp_factor, yf)?.rate());
     }
 }
 
@@ -214,6 +212,7 @@ mod tests {
             Date::new(2022, 1, 1),
             Compounding::Compounded,
             Frequency::Annual,
+            DayCounter::Actual360,
         );
         assert!((fr.unwrap() - 0.01) < 0.0001);
     }
@@ -253,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn test_advance_time_spreadd() -> Result<()> {
+    fn test_advance_time_spread() -> Result<()> {
         let reference_date = Date::new(2021, 1, 1);
         let dates = vec![
             Date::new(2021, 1, 1),
@@ -263,7 +262,7 @@ mod tests {
             Date::new(2022, 1, 1),
         ];
         let rates = vec![0.0, 0.01, 0.02, 0.03, 0.04];
-        let rate_definition = RateDefinition::default();
+        let rate_definition = RateDefinition::new(DayCounter::Actual360, Compounding::Continuous, Frequency::Annual);
 
         let base_curve = Arc::new(
             ZeroRateTermStructure::new(
@@ -297,8 +296,9 @@ mod tests {
             .forward_rate(
                 Date::new(2021, 1, 1),
                 Date::new(2022, 1, 1),
-                Compounding::Simple,
+                Compounding::Continuous,
                 Frequency::Annual,
+                DayCounter::Actual360,
             )
             .unwrap();
 
@@ -307,25 +307,28 @@ mod tests {
         let rate = spreaded_curve
             .forward_rate(
                 Date::new(2021, 1, 1),
-                Date::new(2021, 7, 1),
-                Compounding::Simple,
+                Date::new(2021, 10, 1),
+                Compounding::Continuous,
                 Frequency::Annual,
+                DayCounter::Actual360,
             )
             .unwrap();
-
         assert!((rate - 0.01).abs() < 0.000001);
 
         let df = spreaded_curve.discount_factor(Date::new(2022, 1, 1))?;
-        assert!((df - 0.9903502974223397).abs() < 0.00001);
+        println!("df: {:?}", df);
+        assert!((df - (-0.01_f64 * 365.0/360.0 ).exp()).abs() < 0.00001);
 
+        // Advance to 6 months
         let new_curve = spreaded_curve.advance_to_period(Period::new(1, TimeUnit::Years))?;
 
         let rate = new_curve
             .forward_rate(
                 Date::new(2022, 1, 1),
                 Date::new(2023, 1, 1),
-                Compounding::Simple,
+                Compounding::Continuous,
                 Frequency::Annual,
+                DayCounter::Actual360,
             )
             .unwrap();
 
@@ -335,8 +338,9 @@ mod tests {
             .forward_rate(
                 Date::new(2022, 1, 1),
                 Date::new(2023, 7, 1),
-                Compounding::Simple,
+                Compounding::Continuous,
                 Frequency::Annual,
+                DayCounter::Actual360,
             )
             .unwrap();
 
@@ -344,11 +348,9 @@ mod tests {
 
         let df = new_curve.discount_factor(Date::new(2023, 1, 1))?;
         println!("df: {:?}", df);
-        assert!((df - 0.9903502974223397).abs() < 0.00001);
+        assert!((df - (-0.01_f64 * 365.0/360.0 ).exp()).abs() < 0.00001);
 
         Ok(())
     }
-
-
     
 }

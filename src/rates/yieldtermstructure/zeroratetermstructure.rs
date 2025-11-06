@@ -8,9 +8,7 @@ use crate::{
         traits::{HasReferenceDate, YieldProvider},
     },
     time::{
-        date::Date,
-        enums::{Frequency, TimeUnit},
-        period::Period,
+        date::Date, daycounter::DayCounter, enums::{Frequency, TimeUnit}, period::Period
     },
     utils::errors::{AtlasError, Result},
 };
@@ -151,33 +149,24 @@ impl YieldProvider for ZeroRateTermStructure {
         return Ok(1.0 / compound);
     }
 
+    fn discount_factor_between_dates(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        let df_start = self.discount_factor(start_date)?;
+        let df_end = self.discount_factor(end_date)?;
+        return Ok(df_end / df_start);
+    }
+
     fn forward_rate(
         &self,
         start_date: Date,
         end_date: Date,
         comp: Compounding,
         freq: Frequency,
+        day_counter: DayCounter,
     ) -> Result<f64> {
-        let df_to_star = self.discount_factor(start_date)?;
-        let df_to_end = self.discount_factor(end_date)?;
-
-        let comp_factor = df_to_star / df_to_end;
-
-        let t = self
-            .rate_definition()
-            .day_counter()
-            .year_fraction(start_date, end_date);
-
-        let forward_rate = (InterestRate::implied_rate(
-            comp_factor,
-            self.rate_definition().day_counter(),
-            comp,
-            freq,
-            t,
-        )?)
-        .rate();
-
-        return Ok(forward_rate);
+        let comp_factor = 1.0 / self.discount_factor_between_dates(start_date, end_date)?;
+        let rate_definition = RateDefinition::new(day_counter, comp, freq);
+        let yf = day_counter.year_fraction(start_date, end_date);
+        return Ok(rate_definition.implied_rate(comp_factor, yf)?.rate())
     }
 }
 
@@ -185,7 +174,6 @@ impl YieldProvider for ZeroRateTermStructure {
 impl AdvanceTermStructureInTime for ZeroRateTermStructure {
     fn advance_to_period(&self, period: Period) -> Result<Arc<dyn YieldTermStructureTrait>> {
         let new_reference_date = self.reference_date() + period;
-
         let new_dates: Vec<Date> = self
             .dates()
             .iter()
@@ -206,6 +194,7 @@ impl AdvanceTermStructureInTime for ZeroRateTermStructure {
                     *x,
                     self.rate_definition().compounding(),
                     self.rate_definition().frequency(),
+                    self.rate_definition().day_counter(),
                 )?;
                 Ok(fwr)
             })
@@ -284,6 +273,92 @@ mod tests {
     }
 
     #[test]
+    fn test_zero_rate_curve_df_simple() {
+        let reference_date = Date::new(2021, 1, 1);
+        let dates = vec![
+            Date::new(2021, 1, 1),
+            Date::new(2021, 4, 1),
+            Date::new(2021, 7, 1),
+            Date::new(2021, 10, 1),
+            Date::new(2022, 1, 1),
+        ];
+        let rates = vec![0.0, 0.01, 0.02, 0.03, 0.04];
+
+        // actual/365 
+        let rate_definition = RateDefinition::new(DayCounter::Actual365, Compounding::Simple, Frequency::Annual);
+
+        let zero_rate_curve = ZeroRateTermStructure::new(
+            reference_date,
+            dates.clone(),
+            rates.clone(),
+            rate_definition,
+            Interpolator::Linear,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(zero_rate_curve.discount_factor(Date::new(2022, 1, 1)).unwrap(), 1.0/(1.0 + 0.04 * 365.0/365.0));
+
+        // actual/365 
+        let rate_definition = RateDefinition::new(DayCounter::Actual360, Compounding::Simple, Frequency::Annual);
+
+        let zero_rate_curve = ZeroRateTermStructure::new(
+            reference_date,
+            dates.clone(),
+            rates.clone(),
+            rate_definition,
+            Interpolator::Linear,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(zero_rate_curve.discount_factor(Date::new(2022, 1, 1)).unwrap(), 1.0/(1.0 + 0.04 * 365.0/360.0));
+    }
+
+    #[test]
+    fn test_zero_rate_curve_df_compounded() {
+        let reference_date = Date::new(2021, 1, 1);
+        let dates = vec![
+            Date::new(2021, 1, 1),
+            Date::new(2021, 4, 1),
+            Date::new(2021, 7, 1),
+            Date::new(2021, 10, 1),
+            Date::new(2022, 1, 1),
+        ];
+        let rates = vec![0.0, 0.01, 0.02, 0.03, 0.04];
+
+        // actual/365 
+        let rate_definition = RateDefinition::new(DayCounter::Actual365, Compounding::Compounded, Frequency::Annual);
+
+        let zero_rate_curve = ZeroRateTermStructure::new(
+            reference_date,
+            dates.clone(),
+            rates.clone(),
+            rate_definition,
+            Interpolator::Linear,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(zero_rate_curve.discount_factor(Date::new(2022, 1, 1)).unwrap(), 1.0/(1.0 + 0.04_f64).powf(365.0/365.0));
+
+        // actual/365 
+        let rate_definition = RateDefinition::new(DayCounter::Actual360, Compounding::Compounded, Frequency::Annual);
+
+        let zero_rate_curve = ZeroRateTermStructure::new(
+            reference_date,
+            dates.clone(),
+            rates.clone(),
+            rate_definition,
+            Interpolator::Linear,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(zero_rate_curve.discount_factor(Date::new(2022, 1, 1)).unwrap(), 1.0/(1.0 + 0.04_f64).powf(365.0/360.0));
+    }
+
+    #[test]
     fn test_forward_rate() {
         let reference_date = Date::new(2020, 1, 1);
         let dates = vec![
@@ -311,6 +386,7 @@ mod tests {
             Date::new(2022, 1, 1),
             rate_definition.compounding(),
             rate_definition.frequency(),
+            rate_definition.day_counter(),
         );
 
         println!("fr: {:?}", fr);
@@ -349,6 +425,7 @@ mod tests {
             Date::new(2024, 1, 1),
             rate_definition.compounding(),
             rate_definition.frequency(),
+            rate_definition.day_counter(),
         )?;
 
         let advance_zero_rate_curve = zero_rate_curve.advance_to_date(Date::new(2022, 1, 1))?;
@@ -358,6 +435,7 @@ mod tests {
             Date::new(2024, 1, 1),
             rate_definition.compounding(),
             rate_definition.frequency(),
+            rate_definition.day_counter(),
         )?;
 
         assert!((fr1 - fr2).abs() < 0.000001);
@@ -397,6 +475,7 @@ mod tests {
             Date::new(2024, 2, 1),
             rate_definition.compounding(),
             rate_definition.frequency(),
+            rate_definition.day_counter(),
         )?;
 
         let advance_zero_rate_curve = zero_rate_curve.advance_to_date(Date::new(2022, 1, 1))?;
@@ -406,6 +485,7 @@ mod tests {
             Date::new(2024, 2, 1),
             rate_definition.compounding(),
             rate_definition.frequency(),
+            rate_definition.day_counter(),
         )?;
 
         assert!((fr1 - fr2).abs() < 0.000001);

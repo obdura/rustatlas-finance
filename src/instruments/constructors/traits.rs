@@ -34,10 +34,17 @@ pub fn add_cashflows_to_vec(
     amounts: &[f64],
     side: Side,
     currency: Currency,
+    pay_currency: Option<Currency>,
     cashflow_type: CashflowType,
 ) {
     dates.iter().zip(amounts).for_each(|(date, amount)| {
-        let cashflow = SimpleCashflow::new(*date, currency, side).with_amount(*amount);
+        let mut cashflow = SimpleCashflow::new(*date, currency, side)
+            .with_amount(*amount); 
+
+        if let Some(pay_currency) = pay_currency {
+            cashflow.set_payment_currency(pay_currency);
+        }
+
         match cashflow_type {
             CashflowType::Redemption => cashflows.push(Cashflow::Redemption(cashflow)),
             CashflowType::Disbursement => cashflows.push(Cashflow::Disbursement(cashflow)),
@@ -192,6 +199,7 @@ mod tests {
             &amounts,
             Side::Receive,
             Currency::USD,
+            None,
             CashflowType::Redemption,
         );
 

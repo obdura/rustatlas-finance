@@ -176,7 +176,7 @@ impl<'a> RolloverSimulationEngine<'a> {
             .clone()
             .iter()
             .fold(0.0, |acc, (_, value)| acc + value); // total outstanding amount
-        println!("Outstanding Init: {}", outstanding_init);
+        //println!("Outstanding Init: {}", outstanding_init);
 
         let mut outstanding = outstanding_init;
         let first_date = self.eval_dates.first().unwrap();

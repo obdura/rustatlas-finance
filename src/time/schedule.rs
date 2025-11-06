@@ -187,9 +187,9 @@ impl MakeSchedule {
     }
 
     /// Sets the frequency.
-    pub fn with_frequency(mut self, frequency: Frequency) -> MakeSchedule {
-        self.tenor = Period::from_frequency(frequency).expect("Invalid frequency");
-        self
+    pub fn with_frequency(mut self, frequency: Frequency) -> Result<MakeSchedule> {
+        self.tenor = Period::from_frequency(frequency).ok_or(AtlasError::InvalidValueErr(format!("Invalid frequency for schedule ({})", frequency)))?;
+        Ok(self)
     }
 
     /// Sets the calendar.
@@ -748,15 +748,16 @@ mod tests {
     }
 
     #[test]
-    fn test_make_schedule_with_frequency() {
+    fn test_make_schedule_with_frequency() -> Result<()> {
         let from = Date::new(2022, 1, 1);
         let to = Date::new(2022, 3, 1);
         let tenor = Period::new(1, TimeUnit::Months);
         let frequency = Frequency::Semiannual;
         let make_schedule = MakeSchedule::new(from, to)
             .with_tenor(tenor)
-            .with_frequency(frequency);
+            .with_frequency(frequency)?;
         assert_eq!(make_schedule.tenor, Period::new(6, TimeUnit::Months));
+        Ok(())
     }
 
     #[test]
@@ -1047,12 +1048,12 @@ mod tests {
     }
 
     #[test]
-    fn test_make_schedule_sofr_calendar_10years_1() {
+    fn test_make_schedule_sofr_calendar_10years_1() -> Result<()> {
         let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
         let from = Date::new(2025, 7, 28);
         let to = from + Period::new(10, TimeUnit::Years);
         let schedule = MakeSchedule::new(from, to)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_convention(BusinessDayConvention::ModifiedFollowing)
             .with_termination_date_convention(BusinessDayConvention::ModifiedFollowing)
             .with_calendar(cal)
@@ -1074,15 +1075,16 @@ mod tests {
             Date::new(2035, 7, 30),
         ];
         assert_eq!(schedule.dates().clone(), expected);
+        Ok(())
     }
 
     #[test]
-    fn test_make_schedule_sofr_calendar_10years_2() {
+    fn test_make_schedule_sofr_calendar_10years_2() -> Result<()> {
         let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
         let from = Date::new(2025, 7, 25);
         let to = from + Period::new(10, TimeUnit::Years);
         let schedule = MakeSchedule::new(from, to)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_convention(BusinessDayConvention::ModifiedFollowing)
             .with_termination_date_convention(BusinessDayConvention::ModifiedFollowing)
             .with_calendar(cal)
@@ -1104,15 +1106,16 @@ mod tests {
             Date::new(2035, 7, 25),
         ];
         assert_eq!(schedule.dates().clone(), expected);
+        Ok(())
     }
 
     #[test]
-    fn test_make_schedule_sofr_calendar_15years_1() {
+    fn test_make_schedule_sofr_calendar_15years_1() -> Result<()> {
         let cal = Calendar::UnitedStates(UnitedStates::new(UnitedStatesMarket::Sofr));
         let from = Date::new(2025, 7, 25);
         let to = from + Period::new(15, TimeUnit::Years);
         let schedule = MakeSchedule::new(from, to)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_convention(BusinessDayConvention::ModifiedFollowing)
             .with_termination_date_convention(BusinessDayConvention::ModifiedFollowing)
             .with_calendar(cal)
@@ -1140,6 +1143,7 @@ mod tests {
         expected.iter().for_each(|d| {
             assert!(dates.contains(d));
         });
+        Ok(())
     }
 
     #[test]

@@ -600,24 +600,33 @@ impl YieldProvider for BootstrappingCurve {
         return Ok(discount_factor);
     }
 
+    fn discount_factor_between_dates(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        let discount_factor_to_star = self.discount_factor(start_date)?;
+        let discount_factor_to_end = self.discount_factor(end_date)?;
+
+        let comp_factor = discount_factor_to_end / discount_factor_to_star;
+        return Ok(comp_factor);
+    }
+
     fn forward_rate(
         &self,
         start_date: Date,
         end_date: Date,
         comp: Compounding,
         freq: Frequency,
+        day_counter: DayCounter,
     ) -> Result<f64> {
         let discount_factor_to_star = self.discount_factor(start_date)?;
         let discount_factor_to_end = self.discount_factor(end_date)?;
 
         let comp_factor = discount_factor_to_star / discount_factor_to_end;
-        let t = self.day_counter().year_fraction(start_date, end_date);
+        let yf = self.day_counter().year_fraction(start_date, end_date);
 
         if comp_factor <= 0.0 {
             return Ok(0.0);
         }
 
-        return Ok(implied_rate(comp_factor, *self.day_counter(), comp, freq, t)?.rate());
+        return Ok(implied_rate(comp_factor, day_counter, comp, freq, yf)?.rate());
     }
 }
 
@@ -786,6 +795,7 @@ impl<'a> Model for BootstrappingModel<'a> {
                 fwd.end_date(),
                 fwd.compounding(),
                 fwd.frequency(),
+                fwd.day_counter(),
             )?
         };
 
@@ -1071,6 +1081,7 @@ mod tests {
                 date2,
                 crate::rates::enums::Compounding::Simple,
                 crate::time::enums::Frequency::Annual,
+                crate::time::daycounter::DayCounter::Actual360,
             )
             .unwrap();
         assert!(fwd > 0.0);

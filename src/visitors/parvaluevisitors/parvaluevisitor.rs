@@ -266,7 +266,7 @@ mod tests {
         let ibor_index = IborIndex::new(forecast_curve_1.reference_date())
             .with_fixings(ibor_fixings)
             .with_term_structure(forecast_curve_1)
-            .with_frequency(Frequency::Annual);
+            .with_frequency(Frequency::Annual)?;
 
         let overnight_fixings =
             make_fixings(ref_date - Period::new(1, TimeUnit::Years), ref_date, 0.06);
@@ -498,7 +498,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg, Currency::USD)?;
+        let vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg)?;
 
         let model = SimpleModel::new(&market_store);
 
@@ -535,6 +535,7 @@ mod tests {
             .with_rate(rate)
             .with_side(Side::Receive)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::USD)
             .with_discount_curve_id(Some(2))
             .bullet()
             .build()
@@ -548,6 +549,7 @@ mod tests {
             .with_rate_definition(rate_definition)
             .with_side(Side::Pay)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::USD)
             .with_discount_curve_id(Some(2))
             .with_forecast_curve_id(Some(0))
             .with_notional(notional)
@@ -555,7 +557,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let mut vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg, Currency::USD)?;
+        let mut vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg)?;
         let model = SimpleModel::new(&market_store);
         let fixing_visitor = FixingVisitor::new(&model);
         let _ = fixing_visitor.visit(&mut vanillairsswap);
@@ -671,6 +673,7 @@ mod tests {
             .with_rate(InterestRate::from_rate_definition(0.03, rate_definition))
             .with_side(Side::Receive)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::USD)
             .with_discount_curve_id(Some(2))
             .bullet()
             .build()
@@ -684,6 +687,7 @@ mod tests {
             .with_rate_definition(rate_definition)
             .with_side(Side::Pay)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::USD)
             .with_discount_curve_id(Some(2))
             .with_forecast_curve_id(Some(0))
             .with_notional(notional)
@@ -691,7 +695,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let cross_currency_swap = CrossCurrencySwap::new(fix_leg, float_leg, Currency::USD)?;
+        let cross_currency_swap = CrossCurrencySwap::new(fix_leg, float_leg)?;
         let model = SimpleModel::new(&market_store);
         let par_value_visitor = ParValueConstVisitor::new(&model);
         let par_rate = par_value_visitor.visit(&cross_currency_swap)?;

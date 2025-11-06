@@ -149,14 +149,14 @@ impl FloatingRateCoupon {
     }
 
     pub fn with_exchange_fixing_method(
-        &mut self,
+        mut self,
         method: ExchangeGenerationMethod,
-    ) -> &mut FloatingRateCoupon {
+    ) -> FloatingRateCoupon {
         self.cashflow_mut().set_exchange_fixing_method(method);
         self
     }
 
-    pub fn with_exchange_fixing_date(&mut self, date: Date) -> &mut FloatingRateCoupon {
+    pub fn with_exchange_fixing_date(mut self, date: Date) -> FloatingRateCoupon {
         let method = ExchangeGenerationMethod::SingleDate(SingleDate::new(date));
         self.cashflow_mut().set_exchange_fixing_method(method);
         self
@@ -171,7 +171,7 @@ impl FloatingRateCoupon {
         self.cashflow.set_exchange_fixing_method(method);
     }
 
-    pub fn with_payment_currency(&mut self, currency: Currency) -> &mut FloatingRateCoupon {
+    pub fn with_payment_currency(mut self, currency: Currency) -> FloatingRateCoupon {
         self.cashflow.set_payment_currency(currency);
         self
     }
@@ -203,6 +203,7 @@ impl FloatingRateCoupon {
             fixing_end_date,
             self.rate_definition.compounding(),
             self.rate_definition.frequency(),
+            self.rate_definition.day_counter(),
         );
         Ok(forecast)
     }

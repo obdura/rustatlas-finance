@@ -266,7 +266,7 @@ impl MakeFloatingRateInstrument {
                     }
                 };
                 let mut schedule_builder = MakeSchedule::new(start_date, end_date)
-                    .with_frequency(payment_frequency)
+                    .with_frequency(payment_frequency)?
                     .with_calendar(
                         self.calendar
                             .unwrap_or(Calendar::NullCalendar(NullCalendar::new())),
@@ -309,6 +309,7 @@ impl MakeFloatingRateInstrument {
                     &vec![notional],
                     side.inverse(),
                     currency,
+                    None,
                     CashflowType::Disbursement,
                 );
                 build_coupons_from_notionals(
@@ -326,6 +327,7 @@ impl MakeFloatingRateInstrument {
                     &vec![notional],
                     side,
                     currency,
+                    None,
                     CashflowType::Redemption,
                 );
 
@@ -374,7 +376,7 @@ impl MakeFloatingRateInstrument {
                     }
                 };
                 let schedule = MakeSchedule::new(start_date, end_date)
-                    .with_frequency(payment_frequency)
+                    .with_frequency(payment_frequency)?
                     .with_calendar(
                         self.calendar
                             .unwrap_or(Calendar::NullCalendar(NullCalendar::new())),
@@ -405,6 +407,7 @@ impl MakeFloatingRateInstrument {
                     &vec![notional],
                     side.inverse(),
                     currency,
+                    None,
                     CashflowType::Disbursement,
                 );
                 build_coupons_from_notionals(
@@ -422,6 +425,7 @@ impl MakeFloatingRateInstrument {
                     &vec![notional],
                     side,
                     currency,
+                    None,
                     CashflowType::Redemption,
                 );
 
@@ -470,7 +474,7 @@ impl MakeFloatingRateInstrument {
                     }
                 };
                 let mut schedule_builder = MakeSchedule::new(start_date, end_date)
-                    .with_frequency(payment_frequency)
+                    .with_frequency(payment_frequency)?
                     .with_calendar(
                         self.calendar
                             .unwrap_or(Calendar::NullCalendar(NullCalendar::new())),
@@ -515,6 +519,7 @@ impl MakeFloatingRateInstrument {
                     &vec![notional],
                     side.inverse(),
                     currency,
+                    None,
                     CashflowType::Disbursement,
                 );
                 build_coupons_from_notionals(
@@ -534,6 +539,7 @@ impl MakeFloatingRateInstrument {
                     &redemptions,
                     side,
                     currency,
+                    None,
                     CashflowType::Redemption,
                 );
                 match self.discount_curve_id {
@@ -623,7 +629,9 @@ impl MakeFloatingRateInstrument {
                     .ok_or(AtlasError::ValueNotSetErr("End date".into()))?
                     .1;
 
-                let payment_frequency = self.payment_frequency.expect("Payment frequency not set");
+                let payment_frequency = self.payment_frequency.ok_or(AtlasError::ValueNotSetErr(
+                    "Payment frequency".into(),
+                ))?;
 
                 match self.discount_curve_id {
                     Some(id) => cashflows.iter_mut().for_each(|cf| {

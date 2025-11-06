@@ -50,6 +50,66 @@ impl RateDefinition {
     pub fn day_counter(&self) -> DayCounter {
         return self.day_counter;
     }
+
+    pub fn implied_rate(&self, compound: f64, yf: f64) -> Result<InterestRate> {
+        if compound <= 0.0 {
+            return Err(AtlasError::InvalidValueErr(
+                "Positive compound factor required".to_string(),
+            ));
+        }
+        let r: f64;
+        let f = self.frequency() as i64 as f64;
+        if compound == 1.0 {
+            if yf < 0.0 {
+                return Err(AtlasError::InvalidValueErr(
+                    "Non-negative time required".to_string(),
+                ));
+            }
+            r = 0.0;
+        } else {
+            if yf <= 0.0 {
+                return Err(AtlasError::InvalidValueErr(
+                    "Positive time required".to_string(),
+                ));
+            }
+            match self.compounding() {
+                Compounding::Simple => r = (compound - 1.0) / yf,
+                Compounding::Compounded => r = (compound.powf(1.0 / (f * yf)) - 1.0) * f,
+                Compounding::Continuous => r = (compound).ln() / yf,
+                Compounding::SimpleThenCompounded => {
+                    if yf <= 1.0 / f {
+                        r = (compound - 1.0) / yf
+                    } else {
+                        r = (compound.powf(1.0 / (f * yf)) - 1.0) * f
+                    }
+                }
+                Compounding::CompoundedThenSimple => {
+                    if yf > 1.0 / f {
+                        r = (compound - 1.0) / yf
+                    } else {
+                        r = (compound.powf(1.0 / (f * yf)) - 1.0) * f
+                    }
+                }
+            }
+        }
+        return Ok(InterestRate::new(
+            r,
+            self.compounding(),
+            self.frequency(),
+            self.day_counter(),
+        ));
+    }
+
+    pub fn implied_rate_from_dates(
+        &self,
+        start_date: Date,
+        end_date: Date,
+        compound: f64,
+    ) -> Result<InterestRate> {
+        let day_counter = self.day_counter();
+        let year_fraction = day_counter.year_fraction(start_date, end_date);
+        return self.implied_rate(compound, year_fraction);
+    }
 }
 
 impl Default for RateDefinition {
@@ -130,56 +190,6 @@ impl InterestRate {
         return self.rate_definition.day_counter();
     }
 
-    pub fn implied_rate(
-        compound: f64,
-        result_dc: DayCounter,
-        comp: Compounding,
-        freq: Frequency,
-        t: f64,
-    ) -> Result<InterestRate> {
-        if compound <= 0.0 {
-            return Err(AtlasError::InvalidValueErr(
-                "Positive compound factor required".to_string(),
-            ));
-        }
-        let r: f64;
-        let f = freq as i64 as f64;
-        if compound == 1.0 {
-            if t < 0.0 {
-                return Err(AtlasError::InvalidValueErr(
-                    "Non-negative time required".to_string(),
-                ));
-            }
-            r = 0.0;
-        } else {
-            if t <= 0.0 {
-                return Err(AtlasError::InvalidValueErr(
-                    "Positive time required".to_string(),
-                ));
-            }
-            match comp {
-                Compounding::Simple => r = (compound - 1.0) / t,
-                Compounding::Compounded => r = (compound.powf(1.0 / (f * t)) - 1.0) * f,
-                Compounding::Continuous => r = (compound).ln() / t,
-                Compounding::SimpleThenCompounded => {
-                    if t <= 1.0 / f {
-                        r = (compound - 1.0) / t
-                    } else {
-                        r = (compound.powf(1.0 / (f * t)) - 1.0) * f
-                    }
-                }
-                Compounding::CompoundedThenSimple => {
-                    if t > 1.0 / f {
-                        r = (compound - 1.0) / t
-                    } else {
-                        r = (compound.powf(1.0 / (f * t)) - 1.0) * f
-                    }
-                }
-            }
-        }
-        return Ok(InterestRate::new(r, comp, freq, result_dc));
-    }
-
     pub fn compound_factor(&self, start: Date, end: Date) -> f64 {
         let day_counter = self.day_counter();
         let year_fraction = day_counter.year_fraction(start, end);
@@ -213,16 +223,6 @@ impl InterestRate {
 
     pub fn discount_factor(&self, start: Date, end: Date) -> f64 {
         return 1.0 / self.compound_factor(start, end);
-    }
-
-    pub fn forward_rate(
-        &self,
-        _start_date: Date,
-        _end_date: Date,
-        _comp: Compounding,
-        _freq: Frequency,
-    ) -> f64 {
-        return self.rate;
     }
 }
 
@@ -561,14 +561,19 @@ mod tests {
                 test_case.frequency,
                 DayCounter::Actual360,
             );
-            let implied_rate = InterestRate::implied_rate(
-                rate.compound_factor_from_yf(test_case.time),
+
+            let rate_definition = RateDefinition::new(
                 DayCounter::Actual360,
                 test_case.compounding2,
                 test_case.frequency2,
+            );
+
+            let implied_rate = rate_definition.implied_rate(
+                rate.compound_factor_from_yf(test_case.time),
                 test_case.time,
             )
             .unwrap();
+
             assert!(
                 (implied_rate.rate() - test_case.rate2).abs()
                     < (test_case.precision as f64) / 100.0
@@ -630,27 +635,25 @@ mod tests {
     fn test_implied_rate() {
         // Choose parameters that make sense for your implied_rate function
         // For example:
-        let ir = InterestRate::implied_rate(
-            1.05,
+        let rate_definition = RateDefinition::new(
             DayCounter::Actual360,
             Compounding::Simple,
             Frequency::Annual,
-            1.0,
-        )
-        .unwrap();
+        );
+
+        let ir = rate_definition.implied_rate(1.05, 1.0).unwrap();
         let expected_rate = 0.05;
         assert!((ir.rate() - expected_rate).abs() < EPSILON);
     }
 
     #[test]
     fn test_implied_rate_panic() {
-        let err = InterestRate::implied_rate(
-            0.0,
+        let rate_definition = RateDefinition::new(
             DayCounter::Actual360,
             Compounding::Simple,
             Frequency::Annual,
-            1.0,
         );
+        let err = rate_definition.implied_rate(0.0, 1.0);
         assert!(err.is_err());
     }
 }

@@ -18,7 +18,8 @@ pub struct VanillaIRSSwap {
     first_leg: Leg,
     second_leg: Leg,
     currency: Currency,
-    payment_currency: Currency,
+    payment_currency_first_leg: Currency,
+    payment_currency_second_leg: Currency,
     id: Option<String>,
     first_rate_type: RateType,
     second_rate_type: RateType,
@@ -26,9 +27,11 @@ pub struct VanillaIRSSwap {
 
 impl VanillaIRSSwap {
     /// Create a new vanillairsswap.
-    pub fn new(first_leg: Leg, second_leg: Leg, payment_currency: Currency) -> Result<Self> {
+    pub fn new(first_leg: Leg, second_leg: Leg) -> Result<Self> {
         let _ = check_integrity(&first_leg, &second_leg)?;
         let currency = first_leg.currency();
+        let payment_currency_first_leg = first_leg.pay_currency();
+        let payment_currency_second_leg = second_leg.pay_currency();
         let first_rate_type = first_leg.rate_type();
         let second_rate_type = second_leg.rate_type();
 
@@ -36,7 +39,8 @@ impl VanillaIRSSwap {
             first_leg,
             second_leg,
             currency: currency,
-            payment_currency,
+            payment_currency_first_leg,
+            payment_currency_second_leg,
             id: None,
             first_rate_type,
             second_rate_type,
@@ -63,8 +67,12 @@ impl VanillaIRSSwap {
         self.id = Some(id);
     }
 
-    pub fn payment_currency(&self) -> Currency {
-        self.payment_currency
+    pub fn payment_currency_first_leg(&self) -> Currency {
+        self.payment_currency_first_leg
+    }
+
+    pub fn payment_currency_second_leg(&self) -> Currency {
+        self.payment_currency_second_leg
     }
 
     pub fn id(&self) -> Option<String> {
@@ -151,7 +159,7 @@ fn check_integrity(first_leg: &Leg, second_leg: &Leg) -> Result<()> {
             "Both legs have the same side (e.g., both are Receive or Pay)".to_string(),
         ));
     }
-
+    
     Ok(())
 }
 
@@ -199,6 +207,7 @@ mod tests {
             .with_rate(rate)
             .with_side(Side::Receive)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::CLP)
             .bullet()
             .build()
             .unwrap();
@@ -211,12 +220,13 @@ mod tests {
             .with_rate_definition(rate_definition)
             .with_side(Side::Pay)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::CLP)
             .with_notional(notional)
             .bullet()
             .build()
             .unwrap();
 
-        let mut vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg, Currency::CLP)?;
+        let mut vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg)?;
 
         vanillairsswap.mut_cashflows().for_each(|cf| {
             cf.set_fixing_rate(0.05);

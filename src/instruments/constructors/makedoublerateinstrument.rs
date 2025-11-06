@@ -316,7 +316,7 @@ impl MakeDoubleRateInstrument {
         } else {
             // Schedule builder for the period between start date and change rate date
             let mut schedule_builder_first_part = MakeSchedule::new(start_date, change_rate_date)
-                .with_frequency(payment_frequency)
+                .with_frequency(payment_frequency)?
                 .with_calendar(
                     self.calendar
                         .clone()
@@ -355,7 +355,7 @@ impl MakeDoubleRateInstrument {
 
         // schedule builder for period between change rate date and end date
         let mut schedule_builder_second_part = MakeSchedule::new(change_rate_date, end_date)
-            .with_frequency(payment_frequency)
+            .with_frequency(payment_frequency)?
             .with_calendar(
                 self.calendar
                     .clone()
@@ -522,6 +522,7 @@ impl MakeDoubleRateInstrument {
             &vec![notional],
             side.inverse(),
             currency,
+            None,
             CashflowType::Disbursement,
         );
 
@@ -551,6 +552,7 @@ impl MakeDoubleRateInstrument {
             &redemptions,
             side,
             currency,
+            None,
             CashflowType::Redemption,
         );
 
@@ -561,6 +563,7 @@ impl MakeDoubleRateInstrument {
                 &disbursements,
                 side.inverse(),
                 currency,
+                None,
                 CashflowType::Disbursement,
             );
         }

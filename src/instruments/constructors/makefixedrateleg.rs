@@ -38,6 +38,7 @@ pub struct MakeFixedRateLeg {
     payment_frequency: Option<Frequency>,
     side: Option<Side>,
     currency: Option<Currency>,
+    pay_currency: Option<Currency>,
     notional: Option<f64>,
 
     structure: Option<Structure>,
@@ -70,6 +71,7 @@ impl MakeFixedRateLeg {
             payment_frequency: None,
             side: None,
             currency: None,
+            pay_currency: None,
             notional: None,
             structure: None,
             rate_definition: None,
@@ -91,6 +93,12 @@ impl MakeFixedRateLeg {
         self
     }
 
+    /// Sets the pay currency.
+    pub fn with_pay_currency(mut self, pay_currency: Currency) -> MakeFixedRateLeg {
+        self.pay_currency = Some(pay_currency);
+        self
+    }
+    
     /// Sets the side.
     pub fn with_side(mut self, side: Side) -> MakeFixedRateLeg {
         self.side = Some(side);
@@ -292,6 +300,10 @@ impl MakeFixedRateLeg {
             .currency
             .ok_or(AtlasError::ValueNotSetErr("Currency".into()))?;
 
+        let pay_currency = self
+            .pay_currency
+            .unwrap_or(currency); 
+
         // If no calendar is set, use NullCalendar
         let calendar = self
             .calendar
@@ -353,7 +365,7 @@ impl MakeFixedRateLeg {
                 // make schedule
                 let mut schedule_builder =
                     MakeSchedule::new(adjusted_start_date, adjusted_end_date)
-                        .with_frequency(payment_frequency)
+                        .with_frequency(payment_frequency)?
                         .with_calendar(calendar.clone())
                         .with_convention(business_day_convention)
                         .with_termination_date_convention(termination_business_day_convention)
@@ -393,6 +405,7 @@ impl MakeFixedRateLeg {
                         &vec![notional],
                         side.inverse(),
                         currency,
+                        Some(pay_currency),
                         CashflowType::Disbursement,
                     );
                 }
@@ -404,6 +417,7 @@ impl MakeFixedRateLeg {
                         &vec![notional],
                         side,
                         currency,
+                            Some(pay_currency),
                         CashflowType::Redemption,
                     );
                 }
@@ -437,6 +451,7 @@ impl MakeFixedRateLeg {
                     rate.rate(),
                     rate.rate_definition(),
                     currency,
+                    pay_currency,
                     side,
                     self.discount_curve_id,
                     None,

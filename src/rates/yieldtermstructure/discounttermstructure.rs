@@ -2,8 +2,11 @@ use std::sync::Arc;
 
 use crate::{
     math::interpolation::enums::Interpolator,
-    rates::traits::HasReferenceDate,
-    rates::{enums::Compounding, interestrate::InterestRate, traits::YieldProvider},
+    rates::{
+        enums::Compounding,
+        interestrate::RateDefinition,
+        traits::{HasReferenceDate, YieldProvider},
+    },
     time::{
         date::Date,
         daycounter::DayCounter,
@@ -24,7 +27,7 @@ use super::traits::{AdvanceTermStructureInTime, YieldTermStructureTrait};
 /// * `day_counter` - The day counter of the discount factors
 /// * `interpolator` - The interpolator to use
 /// * `enable_extrapolation` - Enable extrapolation
-/// 
+///
 /// ## Forward Rate
 /// The forward rate is calculated a the Forward Rate between two dates (FRA)
 ///
@@ -88,11 +91,14 @@ impl DiscountTermStructure {
         }
 
         // order dates y discount_factors
-        let mut zipped = dates.into_iter().zip(discount_factors.into_iter()).collect::<Vec<_>>();
+        let mut zipped = dates
+            .into_iter()
+            .zip(discount_factors.into_iter())
+            .collect::<Vec<_>>();
         zipped.sort_by(|a, b| a.0.cmp(&b.0));
-        let (dates, discount_factors) : (Vec<Date>, Vec<f64>) = zipped.into_iter().unzip();
+        let (dates, discount_factors): (Vec<Date>, Vec<f64>) = zipped.into_iter().unzip();
 
-        // discount_factors[0] needs to be 1.0 
+        // discount_factors[0] needs to be 1.0
         if discount_factors[0] != 1.0 {
             return Err(AtlasError::InvalidValueErr(
                 "First discount factor needs to be 1.0".to_string(),
@@ -145,10 +151,13 @@ impl HasReferenceDate for DiscountTermStructure {
 impl YieldProvider for DiscountTermStructure {
     fn discount_factor(&self, date: Date) -> Result<f64> {
         if date < self.reference_date() {
-            return Err(AtlasError::InvalidValueErr(
-                format!("Date {} needs to be greater than reference date {}", date, self.reference_date())
-            ));
+            return Err(AtlasError::InvalidValueErr(format!(
+                "Date {} needs to be greater than reference date {}",
+                date,
+                self.reference_date()
+            )));
         }
+        
         if date == self.reference_date() {
             return Ok(1.0);
         }
@@ -165,6 +174,12 @@ impl YieldProvider for DiscountTermStructure {
         )?;
         return Ok(discount_factor);
     }
+    
+    fn discount_factor_between_dates(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        let df_start = self.discount_factor(start_date)?;
+        let df_end = self.discount_factor(end_date)?;
+        return Ok(df_end / df_start);
+    }
 
     fn forward_rate(
         &self,
@@ -172,16 +187,13 @@ impl YieldProvider for DiscountTermStructure {
         end_date: Date,
         comp: Compounding,
         freq: Frequency,
+        day_counter: DayCounter,
     ) -> Result<f64> {
-        let discount_factor_to_star = self.discount_factor(start_date)?;
-        let discount_factor_to_end = self.discount_factor(end_date)?;
+        let comp_factor = 1.0 / self.discount_factor_between_dates(start_date, end_date)?;
 
-        let comp_factor = discount_factor_to_star / discount_factor_to_end;
-        let t = self.day_counter().year_fraction(start_date, end_date);
-
-        return Ok(
-            InterestRate::implied_rate(comp_factor, self.day_counter(), comp, freq, t)?.rate(),
-        );
+        let yf = day_counter.year_fraction(start_date, end_date);
+        let rate_definition = RateDefinition::new(day_counter, comp, freq);
+        return Ok(rate_definition.implied_rate(comp_factor, yf)?.rate());
     }
 }
 
@@ -191,7 +203,9 @@ impl AdvanceTermStructureInTime for DiscountTermStructure {
         let new_reference_date = self.reference_date() + period;
         let start_df = self.discount_factor(new_reference_date)?;
 
-        let (mut new_dates, mut new_df): (Vec<_>, Vec<_>) = self.dates().iter()
+        let (mut new_dates, mut new_df): (Vec<_>, Vec<_>) = self
+            .dates()
+            .iter()
             .zip(self.discount_factors().iter())
             .filter_map(|(date, &df)| {
                 if date > &new_reference_date {
@@ -201,7 +215,7 @@ impl AdvanceTermStructureInTime for DiscountTermStructure {
                 }
             })
             .unzip();
-            
+
         new_dates.insert(0, new_reference_date);
         new_df.insert(0, 1.0);
 
@@ -377,7 +391,13 @@ mod tests {
 
         assert!(
             (discount_term_structure
-                .forward_rate(Date::new(2020, 1, 1), Date::new(2020, 12, 31), comp, freq)
+                .forward_rate(
+                    Date::new(2020, 1, 1),
+                    Date::new(2020, 12, 31),
+                    comp,
+                    freq,
+                    day_counter
+                )
                 .unwrap()
                 - 0.04097957689796514)
                 .abs()
@@ -386,7 +406,13 @@ mod tests {
         println!(
             "forward_rate: {}",
             discount_term_structure
-                .forward_rate(Date::new(2020, 1, 1), Date::new(2020, 12, 31), comp, freq)
+                .forward_rate(
+                    Date::new(2020, 1, 1),
+                    Date::new(2020, 12, 31),
+                    comp,
+                    freq,
+                    day_counter
+                )
                 .unwrap()
         );
     }
@@ -435,19 +461,25 @@ mod tests {
         )
         .unwrap();
 
-        println!("reference date: {:?}", discount_term_structure.reference_date());
+        println!(
+            "reference date: {:?}",
+            discount_term_structure.reference_date()
+        );
 
         let eval_date = Date::new(2020, 6, 25);
-        let new_reference_date = Date::new(2020, 1, 1) + Period::new(50 , TimeUnit::Days);
+        let new_reference_date = Date::new(2020, 1, 1) + Period::new(50, TimeUnit::Days);
 
         let df_at_eval_date = discount_term_structure.discount_factor(eval_date)?;
-        let df_at_new_reference_date = discount_term_structure.discount_factor(new_reference_date)?;
-        
-        let new_discount_term_structure = discount_term_structure.advance_to_date(new_reference_date)?;
+        let df_at_new_reference_date =
+            discount_term_structure.discount_factor(new_reference_date)?;
+
+        let new_discount_term_structure =
+            discount_term_structure.advance_to_date(new_reference_date)?;
         let new_df_at_eval_date = new_discount_term_structure.discount_factor(eval_date)?;
-        assert!((df_at_eval_date/df_at_new_reference_date - new_df_at_eval_date).abs() < 0.000001);
-        
+        assert!(
+            (df_at_eval_date / df_at_new_reference_date - new_df_at_eval_date).abs() < 0.000001
+        );
+
         Ok(())
     }
-
 }

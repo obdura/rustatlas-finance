@@ -12,15 +12,15 @@ use super::super::traits::{HasCashflows, Visit};
 /// ## Parameters
 /// * `model` - The model to use for fixing
 /// * `decimals_to_round` - The number of decimals to round the fixing fx
-pub struct FixinFxVisitor<'a> {
+pub struct FixingFxVisitor<'a> {
     model: &'a dyn Model,
     decimals_to_round: usize,
     truncated: bool,
 }
 
-impl<'a> FixinFxVisitor<'a> {
+impl<'a> FixingFxVisitor<'a> {
     pub fn new(model: &'a dyn Model) -> Self {
-        FixinFxVisitor {
+        FixingFxVisitor {
             model,
             decimals_to_round: 10,
             truncated: false,
@@ -57,7 +57,7 @@ impl<'a> FixinFxVisitor<'a> {
 }
 
 // Implementation for types concrete
-impl<'a, T: HasCashflows> Visit<T> for FixinFxVisitor<'a> {
+impl<'a, T: HasCashflows> Visit<T> for FixingFxVisitor<'a> {
     type Output = Result<()>;
     fn visit(&self, has_cashflows: &mut T) -> Self::Output {
         self.visit_cashflows(has_cashflows)
@@ -65,7 +65,7 @@ impl<'a, T: HasCashflows> Visit<T> for FixinFxVisitor<'a> {
 }
 
 // Implementation for trait object in Box
-impl<'a> Visit<&mut Box<dyn HasCashflows>> for FixinFxVisitor<'a> {
+impl<'a> Visit<&mut Box<dyn HasCashflows>> for FixingFxVisitor<'a> {
     type Output = Result<()>;
     fn visit(&self, has_cashflows: &mut &mut Box<dyn HasCashflows>) -> Self::Output {
         self.visit_cashflows(has_cashflows.as_mut())

@@ -6,7 +6,7 @@ use crate::{
         interestrate::{InterestRate, RateDefinition},
         traits::{HasReferenceDate, YieldProvider},
     },
-    time::{date::Date, enums::Frequency, period::Period},
+    time::{date::Date, daycounter::DayCounter, enums::Frequency, period::Period},
     utils::errors::{AtlasError, Result},
 };
 
@@ -14,15 +14,15 @@ use super::traits::{AdvanceTermStructureInTime, YieldTermStructureTrait};
 
 /// # FlatForwardTermStructure
 /// Struct that defines a flat forward term structure in base of a reference date and a rate.
-/// 
+///
 /// ## Parameters
 /// * `reference_date` - Reference date for the term structure.
 /// * `rate` - Rate for the term structure.
 /// * `rate_definition` - Rate definition for the term structure.
-/// 
+///
 /// ## Forward Rate
 /// The forward rate is calculated a the Forward Rate between two dates (FRA)
-/// 
+///
 /// # Example
 /// ```
 /// use rustatlas::prelude::*;
@@ -80,23 +80,25 @@ impl YieldProvider for FlatForwardTermStructure {
         }
         return Ok(self.rate.discount_factor(self.reference_date(), date));
     }
+
+    fn discount_factor_between_dates(&self, start_date: Date, end_date: Date) -> Result<f64> {
+        let df_start = self.discount_factor(start_date)?;
+        let df_end = self.discount_factor(end_date)?;
+        return Ok(df_end / df_start);
+    }
+
     fn forward_rate(
         &self,
         start_date: Date,
         end_date: Date,
         comp: Compounding,
         freq: Frequency,
+        day_counter: DayCounter,
     ) -> Result<f64> {
         let comp_factor = self.discount_factor(start_date)? / self.discount_factor(end_date)?;
-        let t = self.rate.day_counter().year_fraction(start_date, end_date);
-        return Ok(InterestRate::implied_rate(
-            comp_factor,
-            self.rate.day_counter(),
-            comp,
-            freq,
-            t,
-        )?
-        .rate());
+        let yf = day_counter.year_fraction(start_date, end_date);
+        let rate_definition = RateDefinition::new(day_counter, comp, freq);
+        return Ok(rate_definition.implied_rate(comp_factor, yf)?.rate());
     }
 }
 
@@ -187,6 +189,7 @@ mod tests {
         let end_date = Date::new(2024, 9, 19);
         let comp = Compounding::Simple;
         let freq = Frequency::Annual;
+        let day_counter = DayCounter::Actual360;
 
         let term_structure =
             FlatForwardTermStructure::new(reference_date, 0.5, RateDefinition::default());
@@ -197,12 +200,34 @@ mod tests {
             .day_counter()
             .year_fraction(start_date, end_date);
 
-        let expected_forward_rate =
-            InterestRate::implied_rate(comp_factor, interest_rate.day_counter(), comp, freq, t)?
-                .rate();
-        let actual_forward_rate = term_structure.forward_rate(start_date, end_date, comp, freq)?;
+        let expected_forward_rate = RateDefinition::new(day_counter, comp, freq)
+            .implied_rate(comp_factor, t)?
+            .rate();
+        let actual_forward_rate =
+            term_structure.forward_rate(start_date, end_date, comp, freq, day_counter)?;
 
         assert_eq!(actual_forward_rate, expected_forward_rate);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_forward_rate_2() -> Result<()> {
+        let reference_date = Date::new(2021, 3, 21);
+        
+        let term_structure =
+            FlatForwardTermStructure::new(reference_date, 0.02, RateDefinition::default());
+
+        let fwd_start = reference_date + Period::new(1, TimeUnit::Years);
+        let fwd_end = reference_date + Period::new(2, TimeUnit::Years);
+
+        let comp = Compounding::Simple;
+        let freq = Frequency::Annual;
+        let day_counter = DayCounter::Actual360;
+
+        let forward_rate = term_structure.forward_rate(fwd_start, fwd_end, comp, freq, day_counter)?;
+        println!("forward_rate: {:?}", forward_rate);
+
 
         Ok(())
     }

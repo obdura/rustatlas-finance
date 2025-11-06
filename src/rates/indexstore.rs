@@ -4,9 +4,13 @@ use std::{
 };
 
 use crate::{
-    currencies::enums::Currency, 
-    time::{date::Date, enums::TimeUnit, period::Period}, 
-    utils::errors::{AtlasError, Result}
+    currencies::enums::Currency,
+    rates::{
+        interestrateindex::overnightindex::OvernightIndex,
+        yieldtermstructure::synthetictermstructure::SyntheticTermStructure,
+    },
+    time::{date::Date, enums::TimeUnit, period::Period},
+    utils::errors::{AtlasError, Result},
 };
 
 use super::{
@@ -20,7 +24,7 @@ use super::{
 /// ## Parameters
 /// * `reference_date` - The reference date of the index store
 /// * `index_map` - A map of indices
-/// * `currency_curve` - A map of currency curves used for forecasting 
+/// * `currency_curve` - A map of currency curves used for forecasting
 #[derive(Clone)]
 pub struct IndexStore {
     reference_date: Date,
@@ -37,10 +41,7 @@ impl IndexStore {
         }
     }
 
-    pub fn set_currency_curves(
-        &mut self,
-        currency_curve: HashMap<Currency, usize>,
-    ) -> Result<()> {
+    pub fn set_currency_curves(&mut self, currency_curve: HashMap<Currency, usize>) -> Result<()> {
         self.currency_curve = currency_curve;
         Ok(())
     }
@@ -60,7 +61,7 @@ impl IndexStore {
     pub fn add_currency_curve(&mut self, currency: Currency, fx_curve: usize) {
         self.currency_curve.insert(currency, fx_curve);
     }
-    
+
     pub fn get_currency_curve(&self, currency: Currency) -> Result<usize> {
         self.currency_curve
             .get(&currency)
@@ -125,10 +126,10 @@ impl IndexStore {
             let index = index.read().unwrap();
             index.clone_box()
         };
-        
+
         let new_id = self.next_available_id();
         self.add_index(new_id, cloned_index)?;
-        
+
         self.rename_term_structure(new_id, new_name)?;
         Ok(new_id)
     }
@@ -159,6 +160,77 @@ impl IndexStore {
 
         self.index_map.insert(id, index);
 
+        Ok(())
+    }
+
+    pub fn add_synthetic_index(
+        &mut self,
+        discount_factor_numerator_ids: Vec<usize>,
+        discount_factor_denominator_ids: Vec<usize>,
+        name: String,
+        currency: Currency,
+    ) -> Result<()> {
+        // check if ids exist
+        for id in discount_factor_numerator_ids.iter() {
+            if !self.index_map.contains_key(id) {
+                return Err(AtlasError::InvalidValueErr(format!(
+                    "Index with id {} does not exist",
+                    id
+                )));
+            }
+        }
+
+        for id in discount_factor_denominator_ids.iter() {
+            if !self.index_map.contains_key(id) {
+                return Err(AtlasError::InvalidValueErr(format!(
+                    "Index with id {} does not exist",
+                    id
+                )));
+            }
+        }
+
+        // check if name already exists
+        for index in self.index_map.values() {
+            if index.read_index()?.name()? == name {
+                return Err(AtlasError::InvalidValueErr(format!(
+                    "Index with name {} already exists",
+                    name
+                )));
+            }
+        }
+
+        // create synthetic term structure
+        let mut discount_factor_numerator = Vec::new();
+        let mut discount_factor_denominator = Vec::new();
+
+        for id in discount_factor_numerator_ids.iter() {
+            let index = self.index_map.get(id).unwrap();
+            let index = index.read().unwrap().term_structure()?;
+            discount_factor_numerator.push(index);
+        }
+
+        for id in discount_factor_denominator_ids.iter() {
+            let index = self.index_map.get(id).unwrap();
+            let index = index.read().unwrap().term_structure()?;
+            discount_factor_denominator.push(index);
+        }
+
+        let synthetic_term_structure = SyntheticTermStructure::new(
+            self.reference_date,
+            discount_factor_numerator,
+            discount_factor_denominator,
+        );
+
+        // create overnight index with synthetic term structure
+        let overnight_index = OvernightIndex::new(self.reference_date)
+            .with_term_structure(Arc::new(synthetic_term_structure))
+            .with_name(Some(name))
+            .with_currency(Some(currency));
+
+        self.index_map.insert(
+            self.next_available_id(),
+            Arc::new(RwLock::new(overnight_index)),
+        );
         Ok(())
     }
 
@@ -266,7 +338,7 @@ impl IndexStore {
         for (currency, curve) in self.currency_curve.iter() {
             store.add_currency_curve(*currency, *curve);
         }
-        
+
         Ok(store)
     }
 
@@ -281,7 +353,12 @@ impl IndexStore {
         self.index_map.insert(to, index);
     }
 
-    pub fn currency_forescast_factor (&self,first_currency: Currency, second_currency: Currency, date: Date) -> Result<f64> {
+    pub fn currency_forescast_factor(
+        &self,
+        first_currency: Currency,
+        second_currency: Currency,
+        date: Date,
+    ) -> Result<f64> {
         if first_currency == second_currency {
             return Ok(1.0);
         }
@@ -294,7 +371,7 @@ impl IndexStore {
         let first_df = first_curve.read_index()?.discount_factor(date)?;
         let second_df = second_curve.read_index()?.discount_factor(date)?;
 
-        Ok(second_df/ first_df)
+        Ok(second_df / first_df)
     }
 }
 
@@ -312,9 +389,16 @@ impl ReadIndex for Arc<RwLock<dyn InterestRateIndexTrait>> {
 }
 
 #[cfg(test)]
-mod tests { 
-    use crate::{math::interpolation::enums::Interpolator, rates::{interestrateindex::iborindex::IborIndex, yieldtermstructure::discounttermstructure::DiscountTermStructure}, time::daycounter::DayCounter};
+mod tests {
     use super::*;
+    use crate::{
+        math::interpolation::enums::Interpolator,
+        rates::{
+            interestrateindex::iborindex::IborIndex,
+            yieldtermstructure::discounttermstructure::DiscountTermStructure,
+        },
+        time::daycounter::DayCounter,
+    };
 
     #[test]
     fn test_rename_index() -> Result<()> {
@@ -329,23 +413,29 @@ mod tests {
         let discount_factors = vec![1.0, 0.99, 0.98, 0.97, 0.96];
         let day_counter = DayCounter::Actual360;
 
-        let discount_term_structure =Arc::new( DiscountTermStructure::new(
+        let discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
                 dates,
                 discount_factors,
                 day_counter,
                 Interpolator::Linear,
                 true,
-            ).unwrap());
+            )
+            .unwrap(),
+        );
 
         let discount_index = IborIndex::new(ref_date)
-                .with_term_structure(discount_term_structure)
-                .with_name(Some("discount_index_test".to_string()));
+            .with_term_structure(discount_term_structure)
+            .with_name(Some("discount_index_test".to_string()));
 
         let mut index_store = IndexStore::new(Date::new(2020, 1, 1));
         index_store.add_index(0, Arc::new(RwLock::new(discount_index)))?;
         index_store.rename_term_structure(0, "discount_index_test_renamed".to_string())?;
-        
-        assert_eq!(index_store.get_index(0)?.read_index()?.name()?, "discount_index_test_renamed");
+
+        assert_eq!(
+            index_store.get_index(0)?.read_index()?.name()?,
+            "discount_index_test_renamed"
+        );
         Ok(())
     }
 
@@ -363,41 +453,72 @@ mod tests {
         let day_counter = DayCounter::Actual360;
 
         let mut fixings: HashMap<Date, f64> = HashMap::new();
-        fixings.insert(Date::new(2019,12,31),0.12);
-        fixings.insert(Date::new(2019,12,30),0.13);
-        fixings.insert(Date::new(2019,12,29),0.14);
+        fixings.insert(Date::new(2019, 12, 31), 0.12);
+        fixings.insert(Date::new(2019, 12, 30), 0.13);
+        fixings.insert(Date::new(2019, 12, 29), 0.14);
 
-        let discount_term_structure =Arc::new( DiscountTermStructure::new(
+        let discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
                 dates,
                 discount_factors,
                 day_counter,
                 Interpolator::Linear,
                 true,
-            ).unwrap());
+            )
+            .unwrap(),
+        );
 
         let discount_index = IborIndex::new(ref_date)
-                .with_term_structure(discount_term_structure.clone())
-                .with_name(Some("discount_index_test".to_string()))
-                .with_fixings(fixings);
+            .with_term_structure(discount_term_structure.clone())
+            .with_name(Some("discount_index_test".to_string()))
+            .with_fixings(fixings);
 
         let mut index_store = IndexStore::new(Date::new(2020, 1, 1));
         index_store.add_index(0, Arc::new(RwLock::new(discount_index)))?;
-        
-        
+
         let fixings_out = index_store.get_index(0)?.read_index()?.fixings().clone();
 
-
         // check fixings
-        assert_eq!(fixings_out.get(&Date::new(2019,12,31)).unwrap(), &0.12);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,30)).unwrap(), &0.13);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,29)).unwrap(), &0.14);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 31)).unwrap(), &0.12);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 30)).unwrap(), &0.13);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 29)).unwrap(), &0.14);
 
         // check discount factors
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2020, 1, 1))?, 1.0);
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2020, 4, 1))?, 0.99);
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2020, 7, 1))?, 0.98);
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2020, 10, 1))?, 0.97);
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2021, 1, 1))?, 0.96);
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2020, 1, 1))?,
+            1.0
+        );
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2020, 4, 1))?,
+            0.99
+        );
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2020, 7, 1))?,
+            0.98
+        );
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2020, 10, 1))?,
+            0.97
+        );
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2021, 1, 1))?,
+            0.96
+        );
 
         // create new term structure
         let new_dates = vec![
@@ -410,36 +531,68 @@ mod tests {
         let new_discount_factors = vec![1.0, 0.89, 0.88, 0.87, 0.86];
         let new_day_counter = DayCounter::Actual360;
 
-        let new_discount_term_structure =Arc::new( DiscountTermStructure::new(
+        let new_discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
                 new_dates,
                 new_discount_factors,
                 new_day_counter,
                 Interpolator::Linear,
                 true,
-            ).unwrap());
+            )
+            .unwrap(),
+        );
 
         index_store.link_term_structure(0, new_discount_term_structure)?;
 
         let fixings_out = index_store.get_index(0)?.read_index()?.fixings().clone();
 
         // check fixings
-        assert_eq!(fixings_out.get(&Date::new(2019,12,31)).unwrap(), &0.12);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,30)).unwrap(), &0.13);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,29)).unwrap(), &0.14);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 31)).unwrap(), &0.12);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 30)).unwrap(), &0.13);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 29)).unwrap(), &0.14);
 
         // check discount factors
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2020, 1, 1))?, 1.0);
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2020, 4, 1))?, 0.89);
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2020, 7, 1))?, 0.88);
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2020, 10, 1))?, 0.87);
-        assert_eq!(index_store.get_index(0)?.read_index()?.discount_factor(Date::new(2021, 1, 1))?, 0.86);
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2020, 1, 1))?,
+            1.0
+        );
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2020, 4, 1))?,
+            0.89
+        );
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2020, 7, 1))?,
+            0.88
+        );
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2020, 10, 1))?,
+            0.87
+        );
+        assert_eq!(
+            index_store
+                .get_index(0)?
+                .read_index()?
+                .discount_factor(Date::new(2021, 1, 1))?,
+            0.86
+        );
 
         Ok(())
     }
-    
 
     #[test]
-    fn test_duplicate()  -> Result<()> {
+    fn test_duplicate() -> Result<()> {
         let ref_date = Date::new(2020, 1, 1);
         let dates = vec![
             Date::new(2020, 1, 1),
@@ -452,22 +605,25 @@ mod tests {
         let day_counter = DayCounter::Actual360;
 
         let mut fixings: HashMap<Date, f64> = HashMap::new();
-        fixings.insert(Date::new(2019,12,31),0.12);
-        fixings.insert(Date::new(2019,12,30),0.13);
-        fixings.insert(Date::new(2019,12,29),0.14);
+        fixings.insert(Date::new(2019, 12, 31), 0.12);
+        fixings.insert(Date::new(2019, 12, 30), 0.13);
+        fixings.insert(Date::new(2019, 12, 29), 0.14);
 
-        let discount_term_structure =Arc::new( DiscountTermStructure::new(
+        let discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
                 dates,
                 discount_factors,
                 day_counter,
                 Interpolator::Linear,
                 true,
-            ).unwrap());
+            )
+            .unwrap(),
+        );
 
         let discount_index = IborIndex::new(ref_date)
-                .with_term_structure(discount_term_structure.clone())
-                .with_name(Some("discount_index_test".to_string()))
-                .with_fixings(fixings);
+            .with_term_structure(discount_term_structure.clone())
+            .with_name(Some("discount_index_test".to_string()))
+            .with_fixings(fixings);
 
         let mut index_store = IndexStore::new(Date::new(2020, 1, 1));
         index_store.add_index(0, Arc::new(RwLock::new(discount_index)))?;
@@ -476,25 +632,34 @@ mod tests {
         index_store.duplicate_index(1, "discount_index_test_duplicated_2".to_string())?;
 
         // check if index exists
-        assert_eq!(index_store.get_index(0)?.read_index()?.name()?, "discount_index_test");
-        assert_eq!(index_store.get_index(1)?.read_index()?.name()?, "discount_index_test_duplicated");
-        assert_eq!(index_store.get_index(2)?.read_index()?.name()?, "discount_index_test_duplicated_2");
-        
+        assert_eq!(
+            index_store.get_index(0)?.read_index()?.name()?,
+            "discount_index_test"
+        );
+        assert_eq!(
+            index_store.get_index(1)?.read_index()?.name()?,
+            "discount_index_test_duplicated"
+        );
+        assert_eq!(
+            index_store.get_index(2)?.read_index()?.name()?,
+            "discount_index_test_duplicated_2"
+        );
+
         // check fixings
         let fixings_out = index_store.get_index(0)?.read_index()?.fixings().clone();
-        assert_eq!(fixings_out.get(&Date::new(2019,12,31)).unwrap(), &0.12);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,30)).unwrap(), &0.13);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,29)).unwrap(), &0.14);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 31)).unwrap(), &0.12);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 30)).unwrap(), &0.13);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 29)).unwrap(), &0.14);
 
         let fixings_out = index_store.get_index(1)?.read_index()?.fixings().clone();
-        assert_eq!(fixings_out.get(&Date::new(2019,12,31)).unwrap(), &0.12);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,30)).unwrap(), &0.13);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,29)).unwrap(), &0.14);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 31)).unwrap(), &0.12);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 30)).unwrap(), &0.13);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 29)).unwrap(), &0.14);
 
         let fixings_out = index_store.get_index(2)?.read_index()?.fixings().clone();
-        assert_eq!(fixings_out.get(&Date::new(2019,12,31)).unwrap(), &0.12);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,30)).unwrap(), &0.13);
-        assert_eq!(fixings_out.get(&Date::new(2019,12,29)).unwrap(), &0.14);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 31)).unwrap(), &0.12);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 30)).unwrap(), &0.13);
+        assert_eq!(fixings_out.get(&Date::new(2019, 12, 29)).unwrap(), &0.14);
 
         Ok(())
     }
@@ -513,7 +678,7 @@ mod tests {
 
         let currency_curves = index_store.get_currency_curve(Currency::CLP)?;
         assert!(currency_curves == 2);
-        
+
         let currency_curves = index_store.get_currency_curve(Currency::BRL)?;
         assert!(currency_curves == 1);
 
@@ -523,9 +688,223 @@ mod tests {
 
         let currency_curves = index_store.get_currency_curve(Currency::CLP)?;
         assert!(currency_curves == 2);
-        
+
         let currency_curves = index_store.get_currency_curve(Currency::BRL)?;
         assert!(currency_curves == 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_synthetic_term_structure_1() -> Result<()> {
+        let ref_date = Date::new(2020, 1, 1);
+        let mut index_store = IndexStore::new(ref_date);
+        
+        let dates = vec![
+            Date::new(2020, 1, 1),
+            Date::new(2020, 4, 1),
+            Date::new(2020, 7, 1),
+            Date::new(2020, 10, 1),
+            Date::new(2021, 1, 1),
+        ];
+        let discount_factors = vec![1.0, 0.99, 0.98, 0.97, 0.96];
+        let day_counter = DayCounter::Actual360;
+
+        let discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
+                dates,
+                discount_factors,
+                day_counter,
+                Interpolator::Linear,
+                true,
+            )
+            .unwrap(),
+        );
+
+        let discount_index = IborIndex::new(ref_date)
+            .with_term_structure(discount_term_structure.clone())
+            .with_name(Some("discount_index_test_1".to_string())); 
+        index_store.add_index(0, Arc::new(RwLock::new(discount_index)))?;
+
+        // create new term structure
+        let new_dates = vec![
+            Date::new(2020, 1, 1),
+            Date::new(2020, 4, 1),
+            Date::new(2020, 7, 1),
+            Date::new(2020, 10, 1),
+            Date::new(2021, 1, 1),
+        ];
+        let new_discount_factors = vec![1.0, 0.89, 0.88, 0.87, 0.86];
+        let new_day_counter = DayCounter::Actual360;
+
+        let new_discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
+                new_dates,
+                new_discount_factors,
+                new_day_counter,
+                Interpolator::Linear,
+                true,
+            )
+            .unwrap(),
+        );
+
+        let new_discount_index = IborIndex::new(ref_date)
+            .with_term_structure(new_discount_term_structure)
+            .with_name(Some("discount_index_test_2".to_string()));
+
+        index_store.add_index(1, Arc::new(RwLock::new(new_discount_index)))?;
+
+        index_store.add_synthetic_index(vec![0], vec![1], String::from("synthetic_index_test"), Currency::USD)?;
+
+        let synthetic_index = index_store.get_index(2)?;
+        let synthetic_index = synthetic_index.read_index()?;
+
+        let df = synthetic_index.discount_factor(Date::new(2020, 4, 1))?;
+        println!("df: {:?}", df);
+        assert!((df - 0.99/0.89).abs() < 0.00001);
+
+        Ok(())
+    }
+
+    
+    #[test]
+    fn test_synthetic_term_structure_2() -> Result<()> {
+        let ref_date = Date::new(2020, 1, 1);
+        let mut index_store = IndexStore::new(ref_date);
+        
+        let dates = vec![
+            Date::new(2020, 1, 1),
+            Date::new(2020, 4, 1),
+            Date::new(2020, 7, 1),
+            Date::new(2020, 10, 1),
+            Date::new(2021, 1, 1),
+        ];
+        let discount_factors = vec![1.0, 0.99, 0.98, 0.97, 0.96];
+        let day_counter = DayCounter::Actual360;
+
+        let discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
+                dates,
+                discount_factors,
+                day_counter,
+                Interpolator::Linear,
+                true,
+            )
+            .unwrap(),
+        );
+
+        let discount_index = IborIndex::new(ref_date)
+            .with_term_structure(discount_term_structure.clone())
+            .with_name(Some("discount_index_test_1".to_string())); 
+        index_store.add_index(0, Arc::new(RwLock::new(discount_index)))?;
+
+        // create new term structure
+        let new_dates = vec![
+            Date::new(2020, 1, 1),
+            Date::new(2020, 4, 1),
+            Date::new(2020, 7, 1),
+            Date::new(2020, 10, 1),
+            Date::new(2021, 1, 1),
+        ];
+        let new_discount_factors = vec![1.0, 0.89, 0.88, 0.87, 0.86];
+        let new_day_counter = DayCounter::Actual360;
+
+        let new_discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
+                new_dates,
+                new_discount_factors,
+                new_day_counter,
+                Interpolator::Linear,
+                true,
+            )
+            .unwrap(),
+        );
+
+        let new_discount_index = IborIndex::new(ref_date)
+            .with_term_structure(new_discount_term_structure)
+            .with_name(Some("discount_index_test_2".to_string()));
+
+        index_store.add_index(1, Arc::new(RwLock::new(new_discount_index)))?;
+
+        index_store.add_synthetic_index(vec![0, 1], vec![], String::from("synthetic_index_test"), Currency::USD)?;
+
+        let synthetic_index = index_store.get_index(2)?;
+        let synthetic_index = synthetic_index.read_index()?;
+
+        let df = synthetic_index.discount_factor(Date::new(2020, 4, 1))?;
+        println!("df: {:?}", df);
+        assert!((df - 0.99*0.89).abs() < 0.00001);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_synthetic_term_structure_3() -> Result<()> {
+        let ref_date = Date::new(2020, 1, 1);
+        let mut index_store = IndexStore::new(ref_date);
+        
+        let dates = vec![
+            Date::new(2020, 1, 1),
+            Date::new(2020, 4, 1),
+            Date::new(2020, 7, 1),
+            Date::new(2020, 10, 1),
+            Date::new(2021, 1, 1),
+        ];
+        let discount_factors = vec![1.0, 0.99, 0.98, 0.97, 0.96];
+        let day_counter = DayCounter::Actual360;
+
+        let discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
+                dates,
+                discount_factors,
+                day_counter,
+                Interpolator::Linear,
+                true,
+            )
+            .unwrap(),
+        );
+
+        let discount_index = IborIndex::new(ref_date)
+            .with_term_structure(discount_term_structure.clone())
+            .with_name(Some("discount_index_test_1".to_string())); 
+        index_store.add_index(0, Arc::new(RwLock::new(discount_index)))?;
+
+        // create new term structure
+        let new_dates = vec![
+            Date::new(2020, 1, 1),
+            Date::new(2020, 4, 1),
+            Date::new(2020, 7, 1),
+            Date::new(2020, 10, 1),
+            Date::new(2021, 1, 1),
+        ];
+        let new_discount_factors = vec![1.0, 0.89, 0.88, 0.87, 0.86];
+        let new_day_counter = DayCounter::Actual360;
+
+        let new_discount_term_structure = Arc::new(
+            DiscountTermStructure::new(
+                new_dates,
+                new_discount_factors,
+                new_day_counter,
+                Interpolator::Linear,
+                true,
+            )
+            .unwrap(),
+        );
+
+        let new_discount_index = IborIndex::new(ref_date)
+            .with_term_structure(new_discount_term_structure)
+            .with_name(Some("discount_index_test_2".to_string()));
+
+        index_store.add_index(1, Arc::new(RwLock::new(new_discount_index)))?;
+
+        index_store.add_synthetic_index(vec![], vec![1, 0], String::from("synthetic_index_test"), Currency::USD)?;
+
+        let synthetic_index = index_store.get_index(2)?;
+        let synthetic_index = synthetic_index.read_index()?;
+
+        let df = synthetic_index.discount_factor(Date::new(2020, 4, 1))?;
+        println!("df: {:?}", df);
+        assert!((df - 1.0 / (0.99*0.89)).abs() < 0.00001);
 
         Ok(())
     }

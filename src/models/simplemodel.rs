@@ -188,6 +188,7 @@ impl<'a> Model for SimpleModel<'a> {
                 fwd.end_date(),
                 fwd.compounding(),
                 fwd.frequency(),
+                fwd.day_counter(),
             )?
         };
 
@@ -316,19 +317,19 @@ mod tests {
 
         let ibor_index_1 = IborIndex::new(forecast_curve_1.reference_date())
             .with_term_structure(forecast_curve_1)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_currency(Some(Currency::USD))
             .with_name(Some("USD_curve".to_string()));
 
         let ibor_index_2 = IborIndex::new(forecast_curve_2.reference_date())
             .with_term_structure(forecast_curve_2)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_currency(Some(Currency::CLP))
             .with_name(Some("CLP_curve".to_string()));
 
         let ibor_index_3 = IborIndex::new(forecast_curve_3.reference_date())
             .with_term_structure(forecast_curve_3)
-            .with_frequency(Frequency::Annual)
+            .with_frequency(Frequency::Annual)?
             .with_currency(Some(Currency::CLF))
             .with_name(Some("CLF_curve".to_string()));
 

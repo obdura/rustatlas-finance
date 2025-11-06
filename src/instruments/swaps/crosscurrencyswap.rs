@@ -14,7 +14,8 @@ pub struct CrossCurrencySwap {
     second_leg: Leg,
     first_leg_currency: Currency,
     second_leg_currency: Currency,
-    payment_currency: Currency,
+    first_leg_pay_currency: Currency,
+    second_leg_pay_currency: Currency,
     initial_fx_rate: Option<f64>,
     id: Option<String>,
     first_rate_type: RateType,
@@ -23,10 +24,13 @@ pub struct CrossCurrencySwap {
 
 impl CrossCurrencySwap {
     /// Create a new crosscurrencyswap.
-    pub fn new(first_leg: Leg, second_leg: Leg, payment_currency: Currency) -> Result<Self> {
+    pub fn new(first_leg: Leg, second_leg: Leg) -> Result<Self> {
         let _ = check_integrity(&first_leg, &second_leg);
         let first_leg_currency = first_leg.currency();
         let second_leg_currency = second_leg.currency();
+        let firts_leg_pay_currency = first_leg.pay_currency();
+        let second_leg_pay_currency = second_leg.pay_currency();
+
         let first_rate_type = first_leg.rate_type();
         let second_rate_type = second_leg.rate_type();
 
@@ -35,7 +39,8 @@ impl CrossCurrencySwap {
             second_leg,
             first_leg_currency,
             second_leg_currency,
-            payment_currency,
+            first_leg_pay_currency: firts_leg_pay_currency,
+            second_leg_pay_currency: second_leg_pay_currency,
             initial_fx_rate: None,
             id: None,
             first_rate_type,
@@ -70,8 +75,12 @@ impl CrossCurrencySwap {
         self.second_leg_currency
     }
 
-    pub fn payment_currency(&self) -> Currency {
-        self.payment_currency
+    pub fn first_leg_pay_currency(&self) -> Currency {
+        self.first_leg_pay_currency
+    }
+
+    pub fn second_leg_pay_currency(&self) -> Currency {
+        self.second_leg_pay_currency
     }
 
     pub fn initial_fx_rate(&self) -> Option<f64> {
@@ -113,7 +122,7 @@ fn check_integrity(first_leg: &Leg, second_leg: &Leg) -> Result<()>{
 
 impl HasCurrency for CrossCurrencySwap {
     fn currency(&self) -> Result<Currency> {
-        Ok(self.payment_currency)
+        Ok(self.first_leg_currency())
     }
 }
 

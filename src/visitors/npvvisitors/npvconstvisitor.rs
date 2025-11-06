@@ -210,7 +210,7 @@ mod tests {
         let ibor_index = IborIndex::new(forecast_curve_1.reference_date())
             .with_fixings(ibor_fixings)
             .with_term_structure(forecast_curve_1)
-            .with_frequency(Frequency::Annual);
+            .with_frequency(Frequency::Annual)?;
 
         let overnight_fixings =
             make_fixings(ref_date - Period::new(1, TimeUnit::Years), ref_date, 0.06);
@@ -351,7 +351,6 @@ mod tests {
             .with_notional(notional)
             .build()?;
 
-
         let model = SimpleModel::new(&market_store);
 
         let fixing_visitor =  FixingVisitor::new(&model);
@@ -359,8 +358,7 @@ mod tests {
 
         let npv_visitor = NPVConstVisitor::new(&model, true);
         let npv = npv_visitor.visit(&instrument)?;
-
-        assert_ne!(npv, 0.0);
+        assert!(npv.abs() < 1e-6);
         Ok(())
     }
 

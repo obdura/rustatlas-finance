@@ -110,14 +110,14 @@ impl FixedRateCoupon {
     }
 
     pub fn with_exchange_fixing_method(
-        &mut self,
+        mut self,
         method: ExchangeGenerationMethod,
-    ) -> &mut FixedRateCoupon {
+    ) -> FixedRateCoupon {
         self.cashflow_mut().set_exchange_fixing_method(method);
         self
     }
 
-    pub fn with_exchange_fixing_date(&mut self, date: Date) -> &mut FixedRateCoupon {
+    pub fn with_exchange_fixing_date(mut self, date: Date) -> FixedRateCoupon {
         let method = ExchangeGenerationMethod::SingleDate(SingleDate::new(date));
         self.cashflow_mut().set_exchange_fixing_method(method);
         self
@@ -132,7 +132,7 @@ impl FixedRateCoupon {
         self.cashflow.set_exchange_fixing_method(method);
     }
 
-    pub fn with_payment_currency(&mut self, currency: Currency) -> &mut FixedRateCoupon {
+    pub fn with_payment_currency(mut self, currency: Currency) -> FixedRateCoupon {
         self.cashflow.set_payment_currency(currency);
         self
     }

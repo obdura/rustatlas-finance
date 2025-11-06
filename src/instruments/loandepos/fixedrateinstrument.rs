@@ -144,8 +144,8 @@ impl FixedRateInstrument {
                 std::mem::swap(&mut self.cashflows, &mut new_cashflows);
             }
             _ => {
-                self.mut_cashflows().for_each(|cf| match cf {
-                    Cashflow::FixedRateCoupon(coupon) => {
+                self.mut_cashflows().for_each(|ref mut cf| match cf {
+                    Cashflow::FixedRateCoupon(ref mut coupon) => {
                         coupon.set_rate(rate);
                     }
                     _ => {}

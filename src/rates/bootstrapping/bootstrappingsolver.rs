@@ -393,6 +393,7 @@ mod tests {
             .with_rate(rate)
             .with_side(Side::Receive)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::USD)
             .with_discount_curve_id(Some(curve_id))
             .with_payment_frequency(Frequency::Annual)
             .bullet()
@@ -411,6 +412,7 @@ mod tests {
             .with_rate_definition(rate_definition)
             .with_side(Side::Pay)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::USD)
             .with_notional(notional)
             .with_discount_curve_id(Some(curve_id))
             .with_forecast_curve_id(Some(curve_id))
@@ -418,7 +420,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg, Currency::USD)?;
+        let vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg)?;
         Ok(vanillairsswap)
     }
 
@@ -449,6 +451,7 @@ mod tests {
             .with_rate(rate)
             .with_side(Side::Receive)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::USD)
             .with_discount_curve_id(Some(curve_id))
             .with_payment_frequency(Frequency::Annual)
             .bullet()
@@ -468,6 +471,7 @@ mod tests {
             .with_rate_definition(rate_definition)
             .with_side(Side::Pay)
             .with_currency(Currency::USD)
+            .with_pay_currency(Currency::USD)
             .with_notional(notional)
             .with_discount_curve_id(Some(curve_id))
             .with_forecast_curve_id(Some(curve_id))
@@ -475,7 +479,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg, Currency::USD)?;
+        let vanillairsswap = VanillaIRSSwap::new(fix_leg, float_leg)?;
         Ok(vanillairsswap)
     }
 

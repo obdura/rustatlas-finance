@@ -104,8 +104,8 @@ impl RolloverStrategy {
         self.discount_curve_id
     }
 
-    pub fn forecast_curve_id(&self) -> usize {
-        self.forecast_curve_id.expect("No forecast curve id")
+    pub fn forecast_curve_id(&self) -> Result<usize> {
+        self.forecast_curve_id.ok_or(AtlasError::ValueNotSetErr("No forecast curve id".to_string()))
     }
 }
 
@@ -186,7 +186,7 @@ impl<'a> PositionGenerator<'a> {
                     .with_payment_frequency(strategies.payment_frequency())
                     .with_structure(structure)
                     .with_side(strategies.side())
-                    .with_forecast_curve_id(Some(strategies.forecast_curve_id()))
+                    .with_forecast_curve_id(Some(strategies.forecast_curve_id()?))
                     .with_discount_curve_id(Some(strategies.discount_curve_id()))
                     .with_currency(self.new_positions_currency)
                     .with_rate_definition(strategies.rate_definition())

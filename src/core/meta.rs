@@ -3,6 +3,7 @@ use crate::currencies::enums::Currency;
 use crate::currencies::exchangerategeneration::{ExchangeGenerationMethod, SingleDate};
 use crate::rates::enums::Compounding;
 use crate::time::date::Date;
+use crate::time::daycounter::DayCounter;
 use crate::time::enums::Frequency;
 
 /// # ExchangeRateRequest
@@ -121,6 +122,7 @@ impl DiscountFactorRequest {
 /// * `end_date` - The end date of the forward rate.
 /// * `compounding` - The compounding of the forward rate.
 /// * `frequency` - The frequency of the forward rate.
+/// * `day_counter` - The day counter of the forward rate.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ForwardRateRequest {
     provider_id: usize,
@@ -128,6 +130,7 @@ pub struct ForwardRateRequest {
     end_date: Date,
     compounding: Compounding,
     frequency: Frequency,
+    day_counter: DayCounter,
 }
 
 impl ForwardRateRequest {
@@ -137,6 +140,7 @@ impl ForwardRateRequest {
         end_date: Date,
         compounding: Compounding,
         frequency: Frequency,
+        day_counter: DayCounter,
     ) -> ForwardRateRequest {
         ForwardRateRequest {
             provider_id,
@@ -144,6 +148,7 @@ impl ForwardRateRequest {
             end_date,
             compounding,
             frequency,
+            day_counter,
         }
     }
 
@@ -165,6 +170,10 @@ impl ForwardRateRequest {
 
     pub fn frequency(&self) -> Frequency {
         self.frequency
+    }
+
+    pub fn day_counter(&self) -> DayCounter {
+        self.day_counter
     }
 }
 
@@ -232,11 +241,13 @@ mod tests {
             sample_date(),
             Compounding::Simple,
             Frequency::Annual,
+            DayCounter::Actual360,
         );
         assert_eq!(req.provider_id(), 99);
         assert_eq!(req.start_date(), sample_date());
         assert_eq!(req.end_date(), sample_date());
         assert_eq!(req.compounding(), Compounding::Simple);
         assert_eq!(req.frequency(), Frequency::Annual);
+        assert_eq!(req.day_counter(), DayCounter::Actual360);
     }
 }

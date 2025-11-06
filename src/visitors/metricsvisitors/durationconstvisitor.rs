@@ -130,7 +130,7 @@ mod tests {
         let ibor_index = IborIndex::new(forecast_curve_1.reference_date())
             .with_fixings(ibor_fixings)
             .with_term_structure(forecast_curve_1)
-            .with_frequency(Frequency::Annual);
+            .with_frequency(Frequency::Annual)?;
 
         let overnight_fixings =
             make_fixings(ref_date - Period::new(1, TimeUnit::Years), ref_date, 0.06);

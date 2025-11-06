@@ -12,7 +12,7 @@ use crate::{
         loandepos::{hybridrateinstrument::HybridRateInstrument, instrument::Instrument},
         traits::{RateType, Structure},
     },
-    rates::interestrate::{InterestRate, RateDefinition},
+    rates::interestrate::RateDefinition,
     time::{date::Date, enums::Frequency},
     utils::errors::AtlasError,
     visitors::traits::{ConstVisit, HasCashflows},
@@ -250,14 +250,11 @@ impl<T: HasCashflows> ConstVisit<T> for CashflowCompressorConstVisitor {
                                     cf.accrual_start_date().unwrap(),
                                     cf.accrual_end_date().unwrap(),
                                 );
-                                let new_rate = InterestRate::implied_rate(
-                                    compound_factor,
-                                    cf.rate().rate_definition().day_counter(),
-                                    cf.rate().rate_definition().compounding(),
-                                    cf.rate().rate_definition().frequency(),
-                                    t,
-                                )
-                                .unwrap();
+                                let new_rate = cf
+                                    .rate()
+                                    .rate_definition()
+                                    .implied_rate(compound_factor, t)
+                                    .unwrap();
                                 pos.set_rate(new_rate);
                                 pos.set_notional(notional);
                             }
@@ -306,11 +303,9 @@ impl<T: HasCashflows> ConstVisit<T> for CashflowCompressorConstVisitor {
                         *estimated_start_date = Some(cf.accrual_start_date().unwrap());
                     }
                 }
-                Cashflow::IndexFxCashflow(_cashflow) => {
-                    Err(AtlasError::InvalidValueErr(
-                        "IndexFxCashflow cashflow are not supported in compressor visitor".to_string(),
-                    ))?
-                }
+                Cashflow::IndexFxCashflow(_cashflow) => Err(AtlasError::InvalidValueErr(
+                    "IndexFxCashflow cashflow are not supported in compressor visitor".to_string(),
+                ))?,
             }
             Ok(())
         })?;
@@ -328,7 +323,7 @@ mod tests {
             makefixedrateinstrument::MakeFixedRateInstrument,
             makefloatingrateinstrument::MakeFloatingRateInstrument,
         },
-        rates::enums::Compounding,
+        rates::{enums::Compounding, interestrate::InterestRate},
         time::{daycounter::DayCounter, enums::TimeUnit, period::Period},
         utils::errors::Result,
     };
