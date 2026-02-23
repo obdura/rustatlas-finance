@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 use crate::{
     rates::{
@@ -124,7 +124,11 @@ impl AdvanceTermStructureInTime for FlatForwardTermStructure {
     }
 }
 
-impl YieldTermStructureTrait for FlatForwardTermStructure {}
+impl YieldTermStructureTrait for FlatForwardTermStructure {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 #[cfg(test)]
 mod tests {

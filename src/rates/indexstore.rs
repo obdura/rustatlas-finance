@@ -168,6 +168,7 @@ impl IndexStore {
         discount_factor_numerator_ids: Vec<usize>,
         discount_factor_denominator_ids: Vec<usize>,
         name: String,
+        id: Option<usize>,
         currency: Currency,
     ) -> Result<()> {
         // check if ids exist
@@ -199,6 +200,19 @@ impl IndexStore {
             }
         }
 
+        let id = if let Some(id) = id {
+            if self.index_map.contains_key(&id) {
+                return Err(AtlasError::InvalidValueErr(format!(
+                    "Index with id {} already exists",
+                    id
+                )));
+            };
+            Ok::<_, AtlasError>(id)
+        } else {
+            Ok(self.next_available_id())
+        }?;
+
+
         // create synthetic term structure
         let mut discount_factor_numerator = Vec::new();
         let mut discount_factor_denominator = Vec::new();
@@ -228,7 +242,7 @@ impl IndexStore {
             .with_currency(Some(currency));
 
         self.index_map.insert(
-            self.next_available_id(),
+            id,
             Arc::new(RwLock::new(overnight_index)),
         );
         Ok(())
@@ -754,7 +768,7 @@ mod tests {
 
         index_store.add_index(1, Arc::new(RwLock::new(new_discount_index)))?;
 
-        index_store.add_synthetic_index(vec![0], vec![1], String::from("synthetic_index_test"), Currency::USD)?;
+        index_store.add_synthetic_index(vec![0], vec![1], String::from("synthetic_index_test"), None, Currency::USD)?;
 
         let synthetic_index = index_store.get_index(2)?;
         let synthetic_index = synthetic_index.read_index()?;
@@ -826,7 +840,7 @@ mod tests {
 
         index_store.add_index(1, Arc::new(RwLock::new(new_discount_index)))?;
 
-        index_store.add_synthetic_index(vec![0, 1], vec![], String::from("synthetic_index_test"), Currency::USD)?;
+        index_store.add_synthetic_index(vec![0, 1], vec![], String::from("synthetic_index_test"), None, Currency::USD)?;
 
         let synthetic_index = index_store.get_index(2)?;
         let synthetic_index = synthetic_index.read_index()?;
@@ -897,7 +911,7 @@ mod tests {
 
         index_store.add_index(1, Arc::new(RwLock::new(new_discount_index)))?;
 
-        index_store.add_synthetic_index(vec![], vec![1, 0], String::from("synthetic_index_test"), Currency::USD)?;
+        index_store.add_synthetic_index(vec![], vec![1, 0], String::from("synthetic_index_test"), None, Currency::USD)?;
 
         let synthetic_index = index_store.get_index(2)?;
         let synthetic_index = synthetic_index.read_index()?;

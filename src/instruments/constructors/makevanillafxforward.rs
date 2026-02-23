@@ -121,18 +121,19 @@ impl MakeVanillaFxForward {
                 Some(date) => date,
                 None => {
                     let tenor = self.tenor.ok_or(AtlasError::ValueNotSetErr(
-                        "Pay date in receive side could not be set".into(),
+                        "Pay date in pay side could not be set".into(),
                     ))?;
-                    let negociation_date =
-                        self.negotiation_date.ok_or(AtlasError::ValueNotSetErr(
-                            "Pay date in receive side could not be set".into(),
-                        ))?;
-                    calendar.advance(
-                        negociation_date,
-                        tenor,
-                        Some(BusinessDayConvention::Following),
-                        false,
-                    )
+                    let negotiation_date = self.negotiation_date.ok_or(
+                        AtlasError::ValueNotSetErr("Pay date in pay side could not be set".into()),
+                    )?;
+                    // calendar.advance(
+                    //     negotiation_date,
+                    //     tenor,
+                    //     Some(BusinessDayConvention::Following),
+                    //     false,
+                    // )
+                    let negotiation_date = negotiation_date.add_period(tenor);
+                    calendar.adjust(negotiation_date, Some(BusinessDayConvention::Following))
                 }
             },
         };
@@ -145,15 +146,17 @@ impl MakeVanillaFxForward {
                     let tenor = self.tenor.ok_or(AtlasError::ValueNotSetErr(
                         "Pay date in pay side could not be set".into(),
                     ))?;
-                    let negociation_date = self.negotiation_date.ok_or(
+                    let negotiation_date = self.negotiation_date.ok_or(
                         AtlasError::ValueNotSetErr("Pay date in pay side could not be set".into()),
                     )?;
-                    calendar.advance(
-                        negociation_date,
-                        tenor,
-                        Some(BusinessDayConvention::Following),
-                        false,
-                    )
+                    // calendar.advance(
+                    //     negotiation_date,
+                    //     tenor,
+                    //     Some(BusinessDayConvention::Following),
+                    //     false,
+                    // )
+                    let negotiation_date = negotiation_date.add_period(tenor);
+                    calendar.adjust(negotiation_date, Some(BusinessDayConvention::Following))
                 }
             },
         };

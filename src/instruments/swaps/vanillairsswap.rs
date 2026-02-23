@@ -14,6 +14,7 @@ use crate::{
 
 /// # Vanilla IRS VanillaIRSSwap
 /// A financial vanillairsswap derivative.
+#[derive(Clone)]
 pub struct VanillaIRSSwap {
     first_leg: Leg,
     second_leg: Leg,

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 use crate::{
     rates::{
@@ -126,7 +126,11 @@ impl AdvanceTermStructureInTime for SyntheticTermStructure {
 }
 
 // Implement the YieldTermStructureTrait trait for CompositeTermStructure
-impl YieldTermStructureTrait for SyntheticTermStructure {}
+impl YieldTermStructureTrait for SyntheticTermStructure {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 #[cfg(test)]
 mod tests {

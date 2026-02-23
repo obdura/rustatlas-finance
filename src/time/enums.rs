@@ -79,7 +79,7 @@ impl Display for Frequency {
 
 /// # TimeUnit
 /// Enum representing a time unit.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub enum TimeUnit {
     Days,
     Weeks,

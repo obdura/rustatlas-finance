@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 use crate::{
     math::interpolation::enums::Interpolator,
@@ -240,7 +240,11 @@ impl AdvanceTermStructureInTime for DiscountTermStructure {
     }
 }
 
-impl YieldTermStructureTrait for DiscountTermStructure {}
+impl YieldTermStructureTrait for DiscountTermStructure {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 #[cfg(test)]
 mod tests {

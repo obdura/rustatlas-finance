@@ -2,7 +2,7 @@ use crate::{cashflows::cashflow::Cashflow, visitors::traits::HasCashflows};
 
 use super::{crosscurrencyswap::CrossCurrencySwap, leg::Leg, vanillairsswap::VanillaIRSSwap};
 
-
+#[derive(Clone)]
 pub enum Swap{
     VanillaIRSSwap(VanillaIRSSwap),
     CrossCurrencySwap(CrossCurrencySwap),

@@ -19,7 +19,7 @@ use crate::utils::errors::{AtlasError, Result};
 /// assert_eq!(p.length(), 5);
 /// assert_eq!(p.units(), TimeUnit::Days);
 /// ```
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub struct Period {
     length: i32,
     units: TimeUnit,

@@ -9,6 +9,7 @@ use super::leg::Leg;
 
 /// # Vanilla IRS CrossCurrencySwap
 /// A financial crosscurrencyswap derivative.
+#[derive(Clone)]
 pub struct CrossCurrencySwap {
     first_leg: Leg,
     second_leg: Leg,
