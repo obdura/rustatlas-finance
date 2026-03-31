@@ -45,10 +45,10 @@ fn make_fixings(start: Date, end: Date, rate: f64) -> HashMap<Date, f64> {
     let mut init = 100.0;
     while seed <= end {
         fixings.insert(seed, init);
-        seed = seed + Period::new(1, TimeUnit::Days);
-        init = init * (1.0 + rate * 1.0 / 360.0);
+        seed += Period::new(1, TimeUnit::Days);
+        init *= 1.0 + rate * 1.0 / 360.0;
     }
-    return fixings;
+    fixings
 }
 
 #[allow(dead_code)]
@@ -104,7 +104,7 @@ pub fn create_store() -> Result<MarketStore> {
     market_store
         .mut_index_store()
         .add_index(2, Arc::new(RwLock::new(discount_index)))?;
-    return Ok(market_store);
+    Ok(market_store)
 }
 
 use rand::Rng;
@@ -182,7 +182,8 @@ impl Mock for MockMaker {
     }
 
     fn generate_random_instruments(n: usize, today: Date) -> Vec<Instrument> {
-        let instruments = (0..n)
+        
+        (0..n)
             .into_par_iter() // Create a parallel iterator
             .map(|_| {
                 let start_date = MockMaker::random_start_date(today);
@@ -206,7 +207,6 @@ impl Mock for MockMaker {
 
                 Instrument::FixedRateInstrument(instrument)
             })
-            .collect();
-        instruments
+            .collect()
     }
 }
