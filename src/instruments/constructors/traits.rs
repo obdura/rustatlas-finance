@@ -42,9 +42,10 @@ pub fn add_cashflows_to_vec(
             .with_amount(*amount); 
 
         if let Some(pay_currency) = pay_currency {
-            cashflow.set_payment_currency(pay_currency);
+            cashflow.set_payment_currency(pay_currency); 
+            cashflow.set_exchange_fixing_date(date.clone());
         }
-
+ 
         match cashflow_type {
             CashflowType::Redemption => cashflows.push(Cashflow::Redemption(cashflow)),
             CashflowType::Disbursement => cashflows.push(Cashflow::Disbursement(cashflow)),

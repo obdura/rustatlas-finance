@@ -38,7 +38,7 @@ impl DateWindow {
         &self.date_window
     }
 
-    pub fn nunmber_of_dates(&self) -> usize {
+    pub fn number_of_dates(&self) -> usize {
         self.date_window.len()
     }
 }

@@ -1,4 +1,4 @@
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
     rates::{
@@ -125,8 +125,8 @@ impl AdvanceTermStructureInTime for FlatForwardTermStructure {
 }
 
 impl YieldTermStructureTrait for FlatForwardTermStructure {
-    fn as_any(&self) -> &dyn Any {
-        self
+    fn pillar_dates(&self) -> Option<Vec<Date>> {
+        None // Flat forward no tiene pilares específicos
     }
 }
 

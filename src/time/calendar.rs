@@ -3,6 +3,8 @@ use serde::Serialize;
 use super::calendars::{
     brazil::Brazil,
     chile::Chile,
+    colombia::Colombia,
+    mexico::Mexico,
     nullcalendar::NullCalendar,
     target::TARGET,
     traits::{ImplCalendar, IsCalendar},
@@ -34,6 +36,8 @@ pub enum Calendar {
     UnitedStates(UnitedStates),
     Brazil(Brazil),
     Chile(Chile),
+    Mexico(Mexico),
+    Colombia(Colombia),
     Composite(Box<Calendar>, Box<Calendar>),
 }
 
@@ -49,6 +53,8 @@ impl Serialize for Calendar {
             Calendar::UnitedStates(cal) => cal.impl_name(),
             Calendar::Brazil(cal) => cal.impl_name(),
             Calendar::Chile(cal) => cal.impl_name(),
+            Calendar::Mexico(cal) => cal.impl_name(),
+            Calendar::Colombia(cal) => cal.impl_name(),
             Calendar::Composite(cal1, cal2) => {
                 format!("Composite({}, {})", cal1.impl_name(), cal2.impl_name())
             }
@@ -70,6 +76,8 @@ impl<'de> serde::Deserialize<'de> for Calendar {
             "UnitedStates" => Ok(Calendar::UnitedStates(UnitedStates::default())),
             "Brazil" => Ok(Calendar::Brazil(Brazil::default())),
             "Chile" => Ok(Calendar::Chile(Chile::default())),
+            "Mexico" => Ok(Calendar::Mexico(Mexico::default())),
+            "Colombia" => Ok(Calendar::Colombia(Colombia::default())),
             _ => Err(serde::de::Error::custom(format!("Invalid calendar: {}", s))),
         }
     }
@@ -86,6 +94,8 @@ impl TryFrom<String> for Calendar {
             "UnitedStates" => Ok(Calendar::UnitedStates(UnitedStates::default())),
             "Brazil" => Ok(Calendar::Brazil(Brazil::default())),
             "Chile" => Ok(Calendar::Chile(Chile::default())),
+            "Mexico" => Ok(Calendar::Mexico(Mexico::default())),
+            "Colombia" => Ok(Calendar::Colombia(Colombia::default())),
             _ => Err(AtlasError::InvalidValueErr(format!(
                 "Invalid calendar: {}",
                 s
@@ -103,6 +113,8 @@ impl From<Calendar> for String {
             Calendar::UnitedStates(_) => "UnitedStates".to_string(),
             Calendar::Brazil(_) => "Brazil".to_string(),
             Calendar::Chile(_) => "Chile".to_string(),
+            Calendar::Mexico(_) => "Mexico".to_string(),
+            Calendar::Colombia(_) => "Colombia".to_string(),
             Calendar::Composite(cal1, cal2) => {
                 format!("Composite({}, {})", cal1.impl_name(), cal2.impl_name())
             }
@@ -119,6 +131,8 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.impl_name(),
             Calendar::Brazil(cal) => cal.impl_name(),
             Calendar::Chile(cal) => cal.impl_name(),
+            Calendar::Mexico(cal) => cal.impl_name(),
+            Calendar::Colombia(cal) => cal.impl_name(),
             Calendar::Composite(cal1, cal2) => {
                 format!("Composite({}, {})", cal1.impl_name(), cal2.impl_name())
             }
@@ -133,6 +147,8 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.impl_is_business_day(date),
             Calendar::Brazil(cal) => cal.impl_is_business_day(date),
             Calendar::Chile(cal) => cal.impl_is_business_day(date),
+            Calendar::Mexico(cal) => cal.impl_is_business_day(date),
+            Calendar::Colombia(cal) => cal.impl_is_business_day(date),
             Calendar::Composite(cal1, cal2) => {
                 cal1.impl_is_business_day(date) && cal2.impl_is_business_day(date)
             }
@@ -147,6 +163,8 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.added_holidays(),
             Calendar::Brazil(cal) => cal.added_holidays(),
             Calendar::Chile(cal) => cal.added_holidays(),
+            Calendar::Mexico(cal) => cal.added_holidays(),
+            Calendar::Colombia(cal) => cal.added_holidays(),
             Calendar::Composite(cal1, cal2) => {
                 let mut holidays = cal1.added_holidays();
                 holidays.extend(cal2.added_holidays());
@@ -163,6 +181,8 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.removed_holidays(),
             Calendar::Brazil(cal) => cal.removed_holidays(),
             Calendar::Chile(cal) => cal.removed_holidays(),
+            Calendar::Colombia(cal) => cal.removed_holidays(),
+            Calendar::Mexico(cal) => cal.removed_holidays(),
             Calendar::Composite(cal1, cal2) => {
                 let mut holidays = cal1.removed_holidays();
                 holidays.extend(cal2.removed_holidays());
@@ -179,6 +199,8 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.add_holiday(date),
             Calendar::Brazil(cal) => cal.add_holiday(date),
             Calendar::Chile(cal) => cal.add_holiday(date),
+            Calendar::Mexico(cal) => cal.add_holiday(date),
+            Calendar::Colombia(cal) => cal.add_holiday(date),
             Calendar::Composite(cal1, cal2) => {
                 cal1.add_holiday(date);
                 cal2.add_holiday(date);
@@ -194,6 +216,8 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.remove_holiday(date),
             Calendar::Brazil(cal) => cal.remove_holiday(date),
             Calendar::Chile(cal) => cal.remove_holiday(date),
+            Calendar::Mexico(cal) => cal.remove_holiday(date),
+            Calendar::Colombia(cal) => cal.remove_holiday(date),
             Calendar::Composite(cal1, cal2) => {
                 cal1.remove_holiday(date);
                 cal2.remove_holiday(date);
@@ -209,6 +233,8 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.holiday_list(from, to, include_weekends),
             Calendar::Brazil(cal) => cal.holiday_list(from, to, include_weekends),
             Calendar::Chile(cal) => cal.holiday_list(from, to, include_weekends),
+            Calendar::Mexico(cal) => cal.holiday_list(from, to, include_weekends),
+            Calendar::Colombia(cal) => cal.holiday_list(from, to, include_weekends),
             Calendar::Composite(cal1, cal2) => {
                 let mut holidays = cal1.holiday_list(from, to, include_weekends);
                 holidays.extend(cal2.holiday_list(from, to, include_weekends));
@@ -225,6 +251,8 @@ impl ImplCalendar for Calendar {
             Calendar::UnitedStates(cal) => cal.business_day_list(from, to),
             Calendar::Brazil(cal) => cal.business_day_list(from, to),
             Calendar::Chile(cal) => cal.business_day_list(from, to),
+            Calendar::Mexico(cal) => cal.business_day_list(from, to),
+            Calendar::Colombia(cal) => cal.business_day_list(from, to),
             Calendar::Composite(cal1, cal2) => {
                 let mut business_days = cal1.business_day_list(from, to);
                 business_days.extend(cal2.business_day_list(from, to));
@@ -245,8 +273,9 @@ mod tests {
     use crate::time::{
         calendar::Calendar,
         calendars::{
-            brazil::Brazil, chile::Chile, nullcalendar::NullCalendar, target::TARGET,
-            traits::ImplCalendar, unitedstates::UnitedStates, weekendsonly::WeekendsOnly,
+            brazil::Brazil, chile::Chile, colombia::Colombia, mexico::Mexico,
+            nullcalendar::NullCalendar, target::TARGET, traits::ImplCalendar,
+            unitedstates::UnitedStates, weekendsonly::WeekendsOnly,
         },
     };
     use serde_json;
@@ -265,6 +294,10 @@ mod tests {
         assert_eq!(calendar.impl_name(), "Brazil(Settlement)");
         let calendar = Calendar::Chile(Chile::default());
         assert_eq!(calendar.impl_name(), "Chile(SSE)");
+        let calendar = Calendar::Mexico(Mexico::default());
+        assert_eq!(calendar.impl_name(), "Mexico(BMV)");
+        let calendar = Calendar::Colombia(Colombia::default());
+        assert_eq!(calendar.impl_name(), "Colombia(BVC)");
         let calendar = Calendar::Composite(
             Box::new(Calendar::TARGET(TARGET::new())),
             Box::new(Calendar::UnitedStates(UnitedStates::default())),

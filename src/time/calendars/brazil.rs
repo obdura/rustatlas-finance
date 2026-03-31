@@ -140,6 +140,7 @@ impl Brazil {
                 || Brazil::is_nossa_senhora_aparecida_day(day, month)
                 || Brazil::is_all_souls_day(day, month)
                 || Brazil::is_republic_day(day, month)
+                || Brazil::is_black_consciousness_day(day, month, year)
                 || Brazil::is_christmas(day, month)
                 || Brazil::is_passion_of_christ(day, month, year)
                 || Brazil::is_carnival(day, month, year)

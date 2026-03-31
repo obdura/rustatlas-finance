@@ -234,7 +234,7 @@ impl<'a> Model for SimpleModel<'a> {
                         .collect::<Result<Vec<f64>>>()?
                         .into_iter()
                         .sum::<f64>();
-                    total / window.nunmber_of_dates() as f64
+                    total / window.number_of_dates() as f64
                 }
                 Some(ExchangeGenerationMethod::Triangulation(tri)) => {
                     let pivot = tri.triangulation_curency();

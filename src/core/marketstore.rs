@@ -145,6 +145,11 @@ impl MarketStore {
         let period = Period::new(days, TimeUnit::Days);
         self.advance_to_period(period)
     }
+
+    /// Get the pillar dates of a term structure by index ID
+    pub fn get_pillar_dates(&self, id: usize) -> Result<Vec<Date>> {
+        self.index_store.get_pillar_dates(id)
+    }
 }
 
 // Implement HasReferenceDate for MarketStore

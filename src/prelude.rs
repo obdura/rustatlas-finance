@@ -21,7 +21,7 @@ pub use crate::{
         traits::*,
     },
     math::{
-        interpolation::{enums::*, linear::*, loglinear::*, traits::*},
+        interpolation::{enums::*, linear::*, loglinear::*, traits::*, cubic::*},
         solver::{brentopt::*, brentroot::*, gaussnewton::*, newtonraphson::*, traits::*},
     },
     models::{simplemodel::*, traits::*},
@@ -44,7 +44,7 @@ pub use crate::{
     time::{
         calendar::*,
         calendars::{
-            brazil::*, chile::*, nullcalendar::*, target::*, unitedstates::*, weekendsonly::*, traits::*,
+            brazil::*, chile::*, nullcalendar::*, target::*, unitedstates::*, weekendsonly::*, traits::*, colombia::*, mexico::*,
         },
         date::*,
         daycounter::*,
@@ -64,7 +64,7 @@ pub use crate::{
             redemptionsconstvisitor::*,
         },
         fixingvisitor::{fixingvisitor::*, fixingfxvisitor::*},
-        metricsvisitors::{durationconstvisitor::*, dv01constvisitor::*, zspreadconstvisitor::*},
+        metricsvisitors::{durationconstvisitor::*, dv01constvisitor::*, zspreadconstvisitor::*, yieldrateconstvisitor::*},
         npvvisitors::{npvbydateconstvisitor::*, npvbytenorconstvisitor::*, npvconstvisitor::*},
         parvaluevisitors::traits::*,
         traits::*,

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{linear::LinearInterpolator, loglinear::LogLinearInterpolator, traits::Interpolate};
+use super::{linear::LinearInterpolator, loglinear::LogLinearInterpolator, traits::Interpolate, cubic::CubicInterpolator};
 
 use crate::utils::errors::Result;
 
@@ -21,6 +21,7 @@ use crate::utils::errors::Result;
 pub enum Interpolator {
     Linear,
     LogLinear,
+    Cubic, 
 }
 
 impl Interpolator {
@@ -37,6 +38,9 @@ impl Interpolator {
             }
             Interpolator::LogLinear => {
                 LogLinearInterpolator::interpolate(x, x_, y_, enable_extrapolation)
+            }
+            Interpolator::Cubic =>  {
+                CubicInterpolator::interpolate(x, x_, y_, enable_extrapolation)
             }
         }
     }

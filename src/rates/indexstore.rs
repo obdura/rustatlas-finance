@@ -387,6 +387,15 @@ impl IndexStore {
 
         Ok(second_df / first_df)
     }
+
+    /// Get the pillar dates of a term structure by index ID
+    pub fn get_pillar_dates(&self, id: usize) -> Result<Vec<Date>> {
+        let index = self.get_index(id)?;
+        let term_structure = index.read_index()?.term_structure()?;
+        term_structure.pillar_dates().ok_or(AtlasError::NotFoundErr(
+            format!("No pillar dates available for index with id {}", id)
+        ))
+    }
 }
 
 // Implement the ReadIndex trait for Arc<RwLock<dyn InterestRateIndexTrait>>

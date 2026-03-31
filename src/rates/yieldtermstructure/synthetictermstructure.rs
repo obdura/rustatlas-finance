@@ -1,4 +1,4 @@
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
     rates::{
@@ -127,8 +127,14 @@ impl AdvanceTermStructureInTime for SyntheticTermStructure {
 
 // Implement the YieldTermStructureTrait trait for CompositeTermStructure
 impl YieldTermStructureTrait for SyntheticTermStructure {
-    fn as_any(&self) -> &dyn Any {
-        self
+    fn pillar_dates(&self) -> Option<Vec<Date>> {
+        if let Some(dates) = self.discount_factor_numerator.first().and_then(|ts| ts.pillar_dates()) {
+            return Some(dates);
+        }
+        if let Some(dates) = self.discount_factor_denominator.first().and_then(|ts| ts.pillar_dates()) {
+            return Some(dates);
+        }
+        None
     }
 }
 

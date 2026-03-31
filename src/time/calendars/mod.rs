@@ -5,3 +5,5 @@ pub mod unitedstates;
 pub mod weekendsonly;
 pub mod brazil;
 pub mod chile;
+pub mod mexico;
+pub mod colombia;

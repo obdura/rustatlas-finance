@@ -1,4 +1,4 @@
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
     math::interpolation::enums::Interpolator,
@@ -241,8 +241,8 @@ impl AdvanceTermStructureInTime for DiscountTermStructure {
 }
 
 impl YieldTermStructureTrait for DiscountTermStructure {
-    fn as_any(&self) -> &dyn Any {
-        self
+    fn pillar_dates(&self) -> Option<Vec<Date>> {
+        Some(self.dates.clone())
     }
 }
 

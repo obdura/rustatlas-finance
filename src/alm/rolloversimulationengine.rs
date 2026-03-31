@@ -21,7 +21,9 @@ use crate::{
     },
     utils::errors::Result,
     visitors::{
-        compressorvisitors::cashflowaggregationvisitor::CashflowsAggregatorConstVisitor, fixingvisitor::fixingvisitor::FixingVisitor, traits::{ConstVisit, Visit}
+        compressorvisitors::cashflowaggregationvisitor::CashflowsAggregatorConstVisitor,
+        fixingvisitor::fixingvisitor::FixingVisitor,
+        traits::{ConstVisit, Visit},
     },
 };
 
@@ -166,7 +168,7 @@ impl<'a> RolloverSimulationEngine<'a> {
 
         // scale redemptions if a scale factor is provided
         if let Some(scale_factor) = self.scale_factor {
-            println!("Scale Factor: {}", scale_factor);
+            // println!("Scale Factor: {}", scale_factor);
             for (_, value) in redemptions.iter_mut() {
                 *value *= scale_factor;
             }
@@ -176,7 +178,6 @@ impl<'a> RolloverSimulationEngine<'a> {
             .clone()
             .iter()
             .fold(0.0, |acc, (_, value)| acc + value); // total outstanding amount
-        //println!("Outstanding Init: {}", outstanding_init);
 
         let mut outstanding = outstanding_init;
         let first_date = self.eval_dates.first().unwrap();
@@ -231,7 +232,6 @@ impl<'a> RolloverSimulationEngine<'a> {
                     outstanding += placement.clone();
                     placement
                 }
-
             };
 
             if amount != 0.0 {
@@ -251,7 +251,6 @@ impl<'a> RolloverSimulationEngine<'a> {
 
                 // generate positions
                 let mut positions = new_generator.generate();
-
 
                 // market data for new positions
                 let model = SimpleModel::new(&tmp_store);
@@ -291,7 +290,6 @@ impl<'a> RolloverSimulationEngine<'a> {
 
 #[cfg(test)]
 mod tests {
-
     use std::sync::{Arc, RwLock};
 
     use crate::{
@@ -568,7 +566,7 @@ mod tests {
         assert_eq!(outstanding, 1800.0);
         Ok(())
     }
-    
+
     #[test]
     fn test_rollover_simulation_engine_inverse_and_growth_mode() -> Result<()> {
         let market_store = create_store().unwrap();
@@ -595,8 +593,11 @@ mod tests {
         let engine =
             RolloverSimulationEngine::new(&market_store, base_redemptions, Currency::USD, horizon)
                 .with_growth_mode(GrowthMode::CustomGrowth)
-                .with_growth_vec(vec![(Period::new(1, TimeUnit::Years), 0.0), (Period::new(2, TimeUnit::Years), 0.0)])?;
-        
+                .with_growth_vec(vec![
+                    (Period::new(1, TimeUnit::Years), 0.0),
+                    (Period::new(2, TimeUnit::Years), 0.0),
+                ])?;
+
         let strategies = vec![
             RolloverStrategy::new(
                 0.5,
@@ -824,7 +825,10 @@ mod tests {
         let delta_date = Actual360::year_fraction(Date::new(2021, 9, 1), eval_date);
         let outstanding = get_outstandings_at_date(&inst, eval_date)?;
         println!("Outstanding: {}", outstanding);
-        println!("Outstanding Recalculated: {}", 1800.0 * (1.0 + 0.1 * delta_date));
+        println!(
+            "Outstanding Recalculated: {}",
+            1800.0 * (1.0 + 0.1 * delta_date)
+        );
         assert!((outstanding + 1800.0 * (1.0 + 0.1 * delta_date)).abs() < 1e-6);
 
         let eval_date = Date::new(2024, 9, 1);

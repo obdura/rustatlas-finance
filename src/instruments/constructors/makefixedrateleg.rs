@@ -98,7 +98,7 @@ impl MakeFixedRateLeg {
         self.pay_currency = Some(pay_currency);
         self
     }
-    
+
     /// Sets the side.
     pub fn with_side(mut self, side: Side) -> MakeFixedRateLeg {
         self.side = Some(side);
@@ -288,36 +288,39 @@ impl MakeFixedRateLeg {
         let mut cashflows = Vec::new();
 
         // Validate required fields
-        let notional = self
-            .notional
-            .ok_or(AtlasError::ValueNotSetErr("Notional".into()))?;
+        let notional = self.notional.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Notional for making a fixed rate leg".into(),
+        ))?;
 
-        let rate = self.rate.ok_or(AtlasError::ValueNotSetErr("Rate".into()))?;
+        let rate = self.rate.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Rate for making a fixed rate leg".into(),
+        ))?;
 
-        let side = self.side.ok_or(AtlasError::ValueNotSetErr("Side".into()))?;
+        let side = self.side.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Side for making a fixed rate leg".into(),
+        ))?;
 
-        let currency = self
-            .currency
-            .ok_or(AtlasError::ValueNotSetErr("Currency".into()))?;
+        let currency = self.currency.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Currency for making a fixed rate leg".into(),
+        ))?;
 
-        let pay_currency = self
-            .pay_currency
-            .unwrap_or(currency); 
+        let pay_currency = self.pay_currency.unwrap_or(currency);
 
         // If no calendar is set, use NullCalendar
         let calendar = self
             .calendar
             .unwrap_or(Calendar::NullCalendar(NullCalendar::new()));
 
-        let structure = self
-            .structure
-            .ok_or(AtlasError::ValueNotSetErr("Structure".into()))?;
-
+        let structure = self.structure.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Structure for making a fixed rate leg".into(),
+        ))?;
+        
         let payment_frequency = if structure == Structure::Zero {
             Frequency::Once
         } else {
-            self.payment_frequency
-                .ok_or(AtlasError::ValueNotSetErr("Payment frequency".into()))?
+            self.payment_frequency.ok_or(AtlasError::ValueNotSetErr(
+                "It is required to set Payment frequency for making a fixed rate leg".into(),
+            ))?
         };
 
         let adjusted_start_date = match self.start_date {
@@ -332,16 +335,18 @@ impl MakeFixedRateLeg {
                     ),
                     None => date,
                 },
-                None => Err(AtlasError::ValueNotSetErr("Start date".into()))?,
+                None => Err(AtlasError::ValueNotSetErr(
+                    "It is required to set Start date for making a fixed rate leg".into(),
+                ))?,
             },
         };
 
         let adjusted_end_date = match self.end_date {
             Some(date) => date,
             None => {
-                let tenor = self
-                    .tenor
-                    .ok_or(AtlasError::ValueNotSetErr("end date".into()))?;
+                let tenor = self.tenor.ok_or(AtlasError::ValueNotSetErr(
+                    "It is required to set End date for making a fixed rate leg".into(),
+                ))?;
                 adjusted_start_date + tenor
             }
         };
@@ -417,7 +422,7 @@ impl MakeFixedRateLeg {
                         &vec![notional],
                         side,
                         currency,
-                            Some(pay_currency),
+                        Some(pay_currency),
                         CashflowType::Redemption,
                     );
                 }
@@ -430,6 +435,7 @@ impl MakeFixedRateLeg {
                     rate,
                     side,
                     currency,
+                    Some(pay_currency),
                 )?;
 
                 match self.discount_curve_id {
@@ -473,6 +479,7 @@ fn build_coupons_from_notionals(
     rate: InterestRate,
     side: Side,
     currency: Currency,
+    pay_currency: Option<Currency>,
 ) -> Result<()> {
     if fixing_dates.len() - 1 != notionals.len() {
         Err(AtlasError::InvalidValueErr(
@@ -492,7 +499,11 @@ fn build_coupons_from_notionals(
         let d1 = fixing_date_pair[0];
         let d2 = fixing_date_pair[1];
         let payment_date = payment_date_pair[1];
-        let coupon = FixedRateCoupon::new(*notional, rate, d1, d2, payment_date, currency, side);
+        let mut coupon = FixedRateCoupon::new(*notional, rate, d1, d2, payment_date, currency, side);
+        if let Some(pay_currency) = pay_currency {
+            coupon.set_payment_currency(pay_currency);
+            coupon.set_exchange_fixing_date(payment_date);
+        }
         cashflows.push(Cashflow::FixedRateCoupon(coupon));
     }
     Ok(())
@@ -503,11 +514,15 @@ mod tests {
 
     use super::MakeFixedRateLeg;
     use crate::{
-        cashflows::{cashflow::Cashflow, side::Side, traits::{InterestAccrual, Payable}}, currencies::enums::Currency, instruments::traits::Structure, rates::{
+        cashflows::{
+            cashflow::Cashflow,
+            side::Side,
+            traits::{InterestAccrual, Payable},
+        }, core::traits::HasCurrency, currencies::enums::Currency, instruments::traits::Structure, rates::{
             enums::Compounding,
             interestrate::{InterestRate, RateDefinition},
         }, time::{
-            calendar::{Calendar},
+            calendar::Calendar,
             calendars::{
                 chile::Chile,
                 unitedstates::{UnitedStates, UnitedStatesMarket},
@@ -813,7 +828,6 @@ mod tests {
         assert!(instrument.payment_frequency() == Frequency::Once);
         assert!(instrument.structure() == Structure::Zero);
         assert!(instrument.cashflows_as_vec().len() == 2);
-
     }
 
     #[test]
@@ -854,6 +868,43 @@ mod tests {
                 }
                 _ => (),
             };
+        });
+    }
+
+    #[test]
+    fn test_make_fixed_rate_leg_with_pay_currency() {
+        let start_date = Date::new(2020, 1, 1);
+        let end_date = start_date + Period::new(5, TimeUnit::Years);
+        let rate_definition = RateDefinition::new(
+            DayCounter::Thirty360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let rate = InterestRate::from_rate_definition(0.5, rate_definition);
+        let notional = 1_000_000.0;
+
+        let fix_leg = MakeFixedRateLeg::new()
+            .with_start_date(start_date)
+            .with_end_date(end_date)
+            .with_notional(notional)
+            .with_rate(rate)
+            .with_side(Side::Receive)
+            .with_currency(Currency::USD)
+            .with_pay_currency(Currency::CLP)
+            .with_discount_curve_id(Some(0))
+            .with_payment_frequency(Frequency::Annual)
+            .bullet()
+            .with_final_flow(false)
+            .build()
+            .unwrap();
+
+        assert!(fix_leg.currency() == Currency::USD);
+        assert!(fix_leg.pay_currency() == Currency::CLP);
+
+        fix_leg.cashflows().for_each(|cf| {
+            assert!(cf.currency().unwrap() == Currency::USD);
+            assert!(cf.payment_currency().unwrap() == Currency::CLP);
+            assert!(!cf.exchange_fixing_method().unwrap().is_none());
         });
     }
 }

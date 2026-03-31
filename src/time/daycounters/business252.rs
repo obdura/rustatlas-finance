@@ -11,6 +11,12 @@ use crate::time::{
 /// # Business252
 /// Business/252 day count convention.
 /// Calculates the number of business days between two dates.
+/// # Details
+/// The number of business days between two dates is the number of days that are
+/// considered business days in the calendar.
+/// 
+/// It is Considere Start Date + 1 to End Date.
+/// 
 /// # Example
 /// ```
 /// use rustatlas::prelude::*;
@@ -27,9 +33,9 @@ impl DayCountProvider for Business252 {
         let calendar = Calendar::Brazil(Brazil::new(BrazilMarket::Settlement));
 
         if end < start {
-            return -(calendar.business_day_list(end, start).len() as i64);
+            return -(calendar.business_day_list(end+1, start).len() as i64);
         } else {
-            return calendar.business_day_list(start, end).len() as i64;
+            return calendar.business_day_list(start+1, end).len() as i64;
         }
     }
 
@@ -81,10 +87,19 @@ mod tests {
     #[test]
     fn test_business252_holiday() {
         // Assuming Jan 1, 2020 is a holiday in Brazil
-        let start = Date::new(2019, 12, 31);
+        let start = Date::new(2019, 12, 30);
         let end = Date::new(2020, 1, 2);
         // Only Dec 31, 2019 and Jan 2, 2020 are business days
         assert_eq!(Business252::day_count(start, end), 2);
         assert_eq!(Business252::year_fraction(start, end), 2.0 / 252.0);
+    }
+
+    #[test]
+    fn test_business252_holiday_2() {
+        // Assuming Jan 1, 2020 is a holiday in Brazil
+        let start = Date::new(2026, 3, 24);
+        let end = Date::new(2026, 4, 1);
+        assert_eq!(Business252::day_count(start, end), 6);
+        assert_eq!(Business252::year_fraction(start, end), 6.0 / 252.0);
     }
 }

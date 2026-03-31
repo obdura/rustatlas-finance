@@ -7,7 +7,7 @@ use crate::{
     },
     time::date::Date,
     utils::errors::{AtlasError, Result},
-    visitors::{traits::HasCashflows},
+    visitors::traits::HasCashflows,
 };
 
 /// # BootstrappingEngine
@@ -23,16 +23,18 @@ pub struct BootstrappingEngine {
     reference_date: Date,
     market_store: BootstrappingMarketStore,
     instruments: Vec<Box<dyn HasCashflows>>,
+    instruments_values: Vec<Option<f64>>,
     number_of_instruments: usize,
     optimization_order: Vec<(usize, usize)>,
 }
 
-impl BootstrappingEngine { 
+impl BootstrappingEngine {
     pub fn new(reference_date: Date, local_currency: Currency) -> Self {
         BootstrappingEngine {
             reference_date,
             market_store: BootstrappingMarketStore::new(reference_date, local_currency),
             instruments: Vec::new(),
+            instruments_values: Vec::new(),
             number_of_instruments: 0,
             optimization_order: Vec::new(),
         }
@@ -64,10 +66,18 @@ impl BootstrappingEngine {
 
     pub fn market_store_and_instruments_mut(
         &mut self,
-    ) -> (&BootstrappingMarketStore, &mut Vec<Box<dyn HasCashflows>>) {
-        (&self.market_store, &mut self.instruments)
+    ) -> (
+        &BootstrappingMarketStore,
+        &mut Vec<Box<dyn HasCashflows>>,
+        &mut Vec<Option<f64>>,
+    ) {
+        (
+            &self.market_store,
+            &mut self.instruments,
+            &mut self.instruments_values,
+        )
     }
-    
+
     pub fn optimization_order(&self) -> &Vec<(usize, usize)> {
         &self.optimization_order
     }
@@ -76,10 +86,15 @@ impl BootstrappingEngine {
         self.optimization_order.len()
     }
 
-    pub fn set_discount_factors(&mut self, curve_id: usize, discount_factors: Vec<f64>) -> Result<()> {
-        self.market_store.set_discount_factors(curve_id, discount_factors)
+    pub fn set_discount_factors(
+        &mut self,
+        curve_id: usize,
+        discount_factors: Vec<f64>,
+    ) -> Result<()> {
+        self.market_store
+            .set_discount_factors(curve_id, discount_factors)
     }
-    
+
     pub fn set_optimization_order(&mut self, order: Vec<(usize, usize)>) {
         self.optimization_order = order;
     }
@@ -101,6 +116,29 @@ impl BootstrappingEngine {
             .add_date(end_date, id)?;
         self.number_of_instruments += 1;
         self.instruments.push(instrument);
+        self.instruments_values.push(None);
+        Ok(())
+    }
+
+    pub fn add_instrument_with_value(
+        &mut self,
+        curve_id: usize,
+        end_date: Date,
+        instrument: Box<dyn HasCashflows>,
+        value: f64,
+    ) -> Result<()> {
+        let id = self.number_of_instruments();
+        let curves_map = self.market_store.curves_map_mut();
+        curves_map
+            .get_mut(&curve_id)
+            .ok_or(AtlasError::BootstrappingErr(format!(
+                "Curve with id {} not found",
+                curve_id
+            )))?
+            .add_date(end_date, id)?;
+        self.number_of_instruments += 1;
+        self.instruments.push(instrument);
+        self.instruments_values.push(Some(value));
         Ok(())
     }
 
@@ -112,27 +150,8 @@ impl BootstrappingEngine {
                 self.number_of_instruments()
             )));
         }
-
-        let curves_map = self.market_store.curves_map_mut();
-        for ((curve_id, element_id), &new_df) in self
-            .optimization_order
-            .iter()
-            .zip(new_discount_factors.iter())
-        {
-            let curve = curves_map.get_mut(curve_id).ok_or_else(|| {
-                AtlasError::BootstrappingErr(format!("Curve with id {} not found", curve_id))
-            })?;
-            let discount_factors = curve.discount_factors_mut();
-            if let Some(df) = discount_factors.get_mut(*element_id) {
-                *df = new_df;
-            } else {
-                return Err(AtlasError::BootstrappingErr(format!(
-                    "Index {} out of bounds for curve {}",
-                    element_id, curve_id
-                )));
-            }
-        }
-        self.market_store.update_discounted_exchange_rates()?;
+        self.market_store
+            .update_discount_factors(new_discount_factors, &self.optimization_order)?;
         Ok(())
     }
 
@@ -176,7 +195,6 @@ impl BootstrappingEngine {
             vec![]
         }
     }
-
 }
 
 use colored::*;
@@ -272,10 +290,7 @@ mod tests {
             period::Period,
         },
         utils::errors::Result,
-        visitors::{
-            npvvisitors::npvconstvisitor::NPVConstVisitor,
-            traits::ConstVisit,
-        },
+        visitors::{npvvisitors::npvconstvisitor::NPVConstVisitor, traits::ConstVisit},
     };
 
     #[test]
@@ -735,5 +750,4 @@ mod tests {
         );
         Ok(())
     }
-
 }

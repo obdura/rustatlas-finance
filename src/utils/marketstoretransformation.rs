@@ -51,7 +51,7 @@ pub struct CurveTransformations {
     pub apply_to: String,
     pub transformation_type: TransformationType,
     pub shift_value: Option<f64>,
-    pub rate_definition: RateDefinition,
+    pub rate_definition: Option<RateDefinition>,
     pub shift_term_structure: Option<Vec<TenorBasedValues>>,
     pub base_term_structure: Option<String>,
     pub spread_term_structure: Option<Vec<TenorBasedValues>>,
@@ -125,10 +125,14 @@ pub fn apply_curve_transformations(
                                 .into())
                             }
                         };
+                        let rate_definition = transform.rate_definition.ok_or(AtlasError::MissingRequiredField(
+                            "rate_definition for ParallelShift".to_string(),
+                        ))?;
+
                         let flat = Arc::new(FlatForwardTermStructure::new(
                             new_market_store.reference_date(),
                             shift,
-                            transform.rate_definition,
+                            rate_definition,
                         ));
                         let composite = Arc::new(CompositeTermStructure::new(
                             flat,
@@ -193,12 +197,15 @@ pub fn apply_curve_transformations(
                             .iter()
                             .map(|v| (reference_date.clone() + v.tenor.clone(), v.value))
                             .unzip();
+                        let rate_definition = transform.rate_definition.ok_or(AtlasError::MissingRequiredField(
+                            "rate_definition for TenorBasedShift".to_string(),
+                        ))?;
 
                         let shift = Arc::new(ZeroRateTermStructure::new(
                             new_market_store.reference_date(),
                             tenors,
                             values,
-                            transform.rate_definition,
+                            rate_definition,
                             Interpolator::Linear,
                             true,
                         )?);
@@ -280,12 +287,16 @@ pub fn apply_curve_transformations(
                     let (tenors, spread_values) =
                         spread.iter().map(|v| (v.tenor.clone(), v.value)).unzip();
 
+                    let rate_definition = transform.rate_definition.ok_or(AtlasError::MissingRequiredField(
+                        "rate_definition for NewCurveAndSpread".to_string(),
+                    ))?;
+
                     // create the spread term structure
                     let spread_term_structure = Arc::new(TenorBasedZeroRateTermStructure::new(
                         new_market_store.reference_date(),
                         tenors,
                         spread_values,
-                        transform.rate_definition,
+                        rate_definition,
                         Interpolator::Linear,
                         true,
                     )?);
@@ -422,11 +433,15 @@ pub fn apply_curve_transformations(
                     let (tenors, spread_values) =
                         spread.iter().map(|v| (v.tenor.clone(), v.value)).unzip();
 
+                    let rate_definition = transform.rate_definition.ok_or(AtlasError::MissingRequiredField(
+                        "rate_definition for NewCurveAndSpread".to_string(),
+                    ))?;
+
                     let spread_term_structure = Arc::new(TenorBasedZeroRateTermStructure::new(
                         new_market_store.reference_date(),
                         tenors,
                         spread_values,
-                        transform.rate_definition,
+                        rate_definition,
                         Interpolator::Linear,
                         true,
                     )?);
@@ -616,7 +631,7 @@ mod tests {
             apply_to: "All".to_string(),
             transformation_type: TransformationType::ParallelShift,
             shift_value: Some(0.01),
-            rate_definition: RateDefinition::default(),
+            rate_definition: Some(RateDefinition::default()),
             shift_term_structure: None,
             base_term_structure: None,
             spread_term_structure: None,
@@ -671,7 +686,7 @@ mod tests {
             apply_to: "ICP".to_string(),
             transformation_type: TransformationType::ParallelShift,
             shift_value: Some(0.01),
-            rate_definition: RateDefinition::default(),
+            rate_definition: Some(RateDefinition::default()),
             shift_term_structure: None,
             base_term_structure: None,
             spread_term_structure: None,
@@ -818,7 +833,7 @@ mod tests {
             apply_to: "ICP_new".to_string(),
             transformation_type: TransformationType::NewCurveAndSpread,
             shift_value: None,
-            rate_definition: RateDefinition::default(),
+            rate_definition: Some(RateDefinition::default()),
             shift_term_structure: None,
             base_term_structure: Some("ICP".to_string()),
             spread_term_structure: Some(spread_term),
@@ -897,7 +912,7 @@ mod tests {
             apply_to: "zero_index".to_string(),
             transformation_type: TransformationType::ImplicitBaseAndSpread,
             shift_value: None,
-            rate_definition: RateDefinition::default(),
+            rate_definition:  Some(RateDefinition::default()),
             shift_term_structure: None,
             base_term_structure: Some("zero_index_base".to_string()),
             spread_term_structure: None,
@@ -985,7 +1000,7 @@ mod tests {
             apply_to: "ICP".to_string(),
             transformation_type: TransformationType::ParallelShift,
             shift_value: Some(0.01),
-            rate_definition: RateDefinition::default(),
+            rate_definition: Some(RateDefinition::default()),
             shift_term_structure: None,
             base_term_structure: None,
             spread_term_structure: None,
@@ -1057,7 +1072,7 @@ mod tests {
                 apply_to: "ICP".to_string(),
                 transformation_type: TransformationType::ParallelShift,
                 shift_value: Some(0.01),
-                rate_definition: RateDefinition::default(),
+                rate_definition: Some(RateDefinition::default()),
                 shift_term_structure: None,
                 base_term_structure: None,
                 spread_term_structure: None,
@@ -1066,7 +1081,7 @@ mod tests {
                 apply_to: "All".to_string(),
                 transformation_type: TransformationType::ParallelShift,
                 shift_value: Some(0.01),
-                rate_definition: RateDefinition::default(),
+                rate_definition: Some(RateDefinition::default()),
                 shift_term_structure: None,
                 base_term_structure: None,
                 spread_term_structure: None,
@@ -1164,7 +1179,7 @@ mod tests {
                 apply_to: "ICP_new".to_string(),
                 transformation_type: TransformationType::NewCurveAndSpread,
                 shift_value: None,
-                rate_definition: RateDefinition::default(),
+                rate_definition: Some(RateDefinition::default()),
                 shift_term_structure: None,
                 base_term_structure: Some("ICP".to_string()),
                 spread_term_structure: Some(spread_term),
@@ -1173,7 +1188,7 @@ mod tests {
                 apply_to: "All".to_string(),
                 transformation_type: TransformationType::ParallelShift,
                 shift_value: Some(0.02),
-                rate_definition: RateDefinition::default(),
+                rate_definition: Some(RateDefinition::default()),
                 shift_term_structure: None,
                 base_term_structure: None,
                 spread_term_structure: None,

@@ -264,17 +264,17 @@ impl MakeFloatingRateLeg {
     pub fn build(self) -> Result<Leg> {
         let mut cashflows = Vec::new();
 
-        let notional = self
-            .notional
-            .ok_or(AtlasError::ValueNotSetErr("Notional".into()))?;
+        let notional = self.notional.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Notional for making a floating rate leg".into(),
+        ))?;
 
-        let structure = self
-            .structure
-            .ok_or(AtlasError::ValueNotSetErr("Structure".into()))?;
+        let structure = self.structure.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Structure for making a floating rate leg".into(),
+        ))?;
 
-        let rate_definition = self
-            .rate_definition
-            .ok_or(AtlasError::ValueNotSetErr("Rate definition".into()))?;
+        let rate_definition = self.rate_definition.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Rate definition for making a floating rate leg".into(),
+        ))?;
 
         // Default spread to 0.0 if not set
         let spread = self.spread.unwrap_or(0.0);
@@ -282,19 +282,20 @@ impl MakeFloatingRateLeg {
         let payment_frequency = if structure == Structure::Zero {
             Frequency::Once
         } else {
-            self.payment_frequency
-                .ok_or(AtlasError::ValueNotSetErr("Payment frequency".into()))?
+            self.payment_frequency.ok_or(AtlasError::ValueNotSetErr(
+                "It is required to set Payment frequency for making a floating rate leg".into(),
+            ))?
         };
 
-        let side = self.side.ok_or(AtlasError::ValueNotSetErr("Side".into()))?;
+        let side = self.side.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Side for making a floating rate leg".into(),
+        ))?;
 
-        let currency = self
-            .currency
-            .ok_or(AtlasError::ValueNotSetErr("Currency".into()))?;
+        let currency = self.currency.ok_or(AtlasError::ValueNotSetErr(
+            "It is required to set Currency for making a floating rate leg".into(),
+        ))?;
 
-        let pay_currency = self
-            .pay_currency
-            .unwrap_or(currency);
+        let pay_currency = self.pay_currency.unwrap_or(currency);
 
         // Default calendar to NullCalendar if not set
         let calendar = self
@@ -420,7 +421,7 @@ impl MakeFloatingRateLeg {
                         &vec![notional],
                         side,
                         currency,
-                        Some(pay_currency), 
+                        Some(pay_currency),
                         CashflowType::Redemption,
                     );
                 }
@@ -435,6 +436,7 @@ impl MakeFloatingRateLeg {
                     rate_definition,
                     side,
                     currency,
+                    Some(pay_currency),
                 );
 
                 match self.discount_curve_id {
@@ -484,6 +486,7 @@ fn build_coupons_from_notionals(
     rate_definition: RateDefinition,
     side: Side,
     currency: Currency,
+    pay_currency: Option<Currency>,
 ) {
     for (((accrual_date_pair, fixing_date_pair), payment_date_pair), notional) in accrual_dates
         .windows(2)
@@ -505,6 +508,10 @@ fn build_coupons_from_notionals(
             side,
         );
         coupon.with_fixing_dates(fixing_date_pair[0], fixing_date_pair[1]);
+        if let Some(pay_currency) = pay_currency {
+            coupon.set_payment_currency(pay_currency);
+            coupon.set_exchange_fixing_date(payment_date);
+        }
         cashflows.push(Cashflow::FloatingRateCoupon(coupon));
     }
 }
@@ -516,11 +523,7 @@ mod tests {
             cashflow::Cashflow,
             side::Side,
             traits::{InterestAccrual, Payable, RequiresFixingRate},
-        },
-        currencies::enums::Currency,
-        instruments::{constructors::makefloatingrateleg::MakeFloatingRateLeg, traits::Structure},
-        rates::{enums::Compounding, interestrate::RateDefinition},
-        time::{
+        }, core::traits::HasCurrency, currencies::enums::Currency, instruments::{constructors::makefloatingrateleg::MakeFloatingRateLeg, traits::Structure}, rates::{enums::Compounding, interestrate::RateDefinition}, time::{
             calendar::Calendar,
             calendars::{
                 chile::Chile,
@@ -530,8 +533,7 @@ mod tests {
             daycounter::DayCounter,
             enums::{BusinessDayConvention, Frequency, TimeUnit},
             period::Period,
-        },
-        visitors::traits::HasCashflows,
+        }, visitors::traits::HasCashflows
     };
 
     #[test]
@@ -848,7 +850,49 @@ mod tests {
             .cashflows()
             .filter(|cf| cf.payment_date() == Date::new(2025, 8, 13))
             .for_each(|cf| {
-                assert!(cf.accrual_start_date().unwrap() != cf.fixing_start_date().unwrap().unwrap());
+                assert!(
+                    cf.accrual_start_date().unwrap() != cf.fixing_start_date().unwrap().unwrap()
+                );
             });
+    }
+
+    #[test]
+    fn test_make_floating_rate_leg_with_pay_currency() {
+        let start_date = Date::new(2025, 8, 11);
+        let rate_defintion = RateDefinition::new(
+            DayCounter::Actual360,
+            Compounding::Compounded,
+            Frequency::Annual,
+        );
+        let rate_definition = RateDefinition::default();
+
+        let calendar = Calendar::Chile(Chile::default());
+        let notional = 1_000_000.0;
+        let instrument = MakeFloatingRateLeg::new()
+            .with_calendar(Some(calendar))
+            .with_negotiation_date(start_date)
+            .with_tenor(Period::new(8, TimeUnit::Years))
+            .with_rate_definition(rate_defintion)
+            .with_settlement_period(Period::new(2, TimeUnit::Days))
+            .with_business_day_convention(Some(BusinessDayConvention::ModifiedFollowing))
+            .with_business_day_convention_fixing_dates(Some(BusinessDayConvention::Unadjusted))
+            .with_payment_lag(Period::new(0, TimeUnit::Days))
+            .with_rate_definition(rate_definition)
+            .with_notional(notional)
+            .with_side(Side::Pay)
+            .with_payment_frequency(Frequency::Annual)
+            .with_currency(Currency::USD)
+            .with_pay_currency(Currency::CLP)
+            .bullet()
+            .build()
+            .unwrap();
+        assert!(instrument.currency() == Currency::USD);
+        assert!(instrument.pay_currency() == Currency::CLP);
+
+        instrument.cashflows().for_each(|cf| {
+            assert!(cf.currency().unwrap() == Currency::USD);
+            assert!(cf.payment_currency().unwrap() == Currency::CLP);
+            assert!(!cf.exchange_fixing_method().unwrap().is_none());
+        });
     }
 }

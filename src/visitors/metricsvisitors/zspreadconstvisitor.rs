@@ -111,7 +111,7 @@ where
         let solver = BrentOpt::new(npv, -1.0, 1.0);
         let res = solver.solve()?;
 
-        Ok(res.minimum)
+        Ok(res.argmin)
     }
 }
 

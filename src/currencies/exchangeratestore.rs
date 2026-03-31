@@ -166,40 +166,46 @@ impl ExchangeRateStore {
             return self.get_exchange_rate(first_ccy, second_ccy);
         }
 
-        let history = self.exchange_rate_history.get(&(first_ccy, second_ccy));
-        if let Some(history) = history {
-            if let Some(rate) = history.get(&date) {
-                return Ok(*rate);
-            } else {
-                return Err(AtlasError::NotFoundErr(format!(
-                    "No exchange rate found between {:?} and {:?} for date {}",
-                    first_ccy, second_ccy, date
-                )));
-            }
-        } else {
-            let history = self.exchange_rate_history.get(&(second_ccy, first_ccy));
-            if let Some(history) = history {
-                if let Some(rate) = history.get(&date) {
-                    if rate == &0.0 {
-                        return Err(AtlasError::InvalidValueErr(format!(
-                            "Inverse exchange rate between {:?} and {:?} for date {} is zero",
-                            second_ccy, first_ccy, date
-                        )));
-                    }
+        if first_ccy == second_ccy {
+            return Ok(1.0);
+        }
 
-                    return Ok(1.0 / *rate);
-                } else {
-                    return Err(AtlasError::NotFoundErr(format!(
-                        "No exchange rate found between {:?} and {:?} for date {}",
-                        first_ccy, second_ccy, date
-                    )));
+        let mut date_rates: HashMap<(Currency, Currency), f64> = HashMap::new();
+        for ((ccy1, ccy2), history) in &self.exchange_rate_history {
+            if let Some(&rate) = history.get(&date) {
+                date_rates.insert((*ccy1, *ccy2), rate);
+            }
+        }
+
+        let mut q: VecDeque<(Currency, f64)> = VecDeque::new();
+        let mut visited: HashSet<Currency> = HashSet::new();
+        q.push_back((first_ccy, 1.0));
+        visited.insert(first_ccy);
+
+        while let Some((current_ccy, rate)) = q.pop_front() {
+            for (&(source, dest), &map_rate) in &date_rates {
+                if source == current_ccy && !visited.contains(&dest) {
+                    let new_rate = rate * map_rate;
+                    if dest == second_ccy {
+                        return Ok(new_rate);
+                    }
+                    visited.insert(dest);
+                    q.push_back((dest, new_rate));
+                } else if dest == current_ccy && !visited.contains(&source) {
+                    let new_rate = rate / map_rate;
+                    if source == second_ccy {
+                        return Ok(new_rate);
+                    }
+                    visited.insert(source);
+                    q.push_back((source, new_rate));
                 }
             }
-            return Err(AtlasError::NotFoundErr(format!(
-                "No exchange rate history found between {:?} and {:?}",
-                first_ccy, second_ccy
-            )));
         }
+
+        Err(AtlasError::NotFoundErr(format!(
+            "No exchange rate history found between {:?} and {:?} for date {}",
+            first_ccy, second_ccy, date
+        )))
     }
 }
 

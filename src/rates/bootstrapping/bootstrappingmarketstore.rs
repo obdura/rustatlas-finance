@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    fmt::Display,
     sync::{Arc, Mutex, RwLock},
 };
 
@@ -338,6 +339,70 @@ impl BootstrappingMarketStore {
             .set_discount_factors(discount_factors);
         Ok(())
     }
+
+    pub fn update_discount_factors(
+        &mut self,
+        new_discount_factors: &[f64],
+        order: &Vec<(usize, usize)>,
+    ) -> Result<()> {
+        if new_discount_factors.len() != order.len() {
+            return Err(AtlasError::BootstrappingErr(format!(
+                "Number of new discount factors ({}) does not match the number indexes ({})",
+                new_discount_factors.len(),
+                order.len()
+            )));
+        }
+
+        let curves_map = self.curves_map_mut();
+        for ((curve_id, element_id), &new_df) in order.iter().zip(new_discount_factors.iter()) {
+            let curve = curves_map.get_mut(curve_id).ok_or_else(|| {
+                AtlasError::BootstrappingErr(format!("Curve with id {} not found", curve_id))
+            })?;
+            let discount_factors = curve.discount_factors_mut();
+            if let Some(df) = discount_factors.get_mut(*element_id) {
+                *df = new_df;
+            } else {
+                return Err(AtlasError::BootstrappingErr(format!(
+                    "Index {} out of bounds for curve {}",
+                    element_id, curve_id
+                )));
+            }
+        }
+        self.update_discounted_exchange_rates()?;
+        Ok(())
+    }
+
+    pub fn add_delta_to_discount_factors(
+        &mut self,
+        delta_discount_factors: &[f64],
+        order: &Vec<(usize, usize)>,
+    ) -> Result<()> {
+        if delta_discount_factors.len() != order.len() {
+            return Err(AtlasError::BootstrappingErr(format!(
+                "Number of new discount factors ({}) does not match the number indexes ({})",
+                delta_discount_factors.len(),
+                order.len()
+            )));
+        }
+
+        let curves_map = self.curves_map_mut();
+        for ((curve_id, element_id), &delta_df) in order.iter().zip(delta_discount_factors.iter()) {
+            let curve = curves_map.get_mut(curve_id).ok_or_else(|| {
+                AtlasError::BootstrappingErr(format!("Curve with id {} not found", curve_id))
+            })?;
+            let discount_factors = curve.discount_factors_mut();
+            if let Some(df) = discount_factors.get_mut(*element_id) {
+                *df += delta_df;
+            } else {
+                return Err(AtlasError::BootstrappingErr(format!(
+                    "Index {} out of bounds for curve {}",
+                    element_id, curve_id
+                )));
+            }
+        }
+        self.update_discounted_exchange_rates()?;
+        Ok(())
+    }
 }
 
 /// Convert BootstrappingMarketStore to MarketStore
@@ -398,6 +463,74 @@ impl TryFrom<&BootstrappingMarketStore> for MarketStore {
         market_store.set_index_store(new_index_store)?;
 
         Ok(market_store)
+    }
+}
+
+use colored::*;
+impl Display for BootstrappingMarketStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\n")?;
+        writeln!(
+            f,
+            "{}",
+            "=====================================".blue().bold()
+        )?;
+        writeln!(
+            f,
+            "{}",
+            "Bootstrapping Market Store:".bold().underline().blue()
+        )?;
+        writeln!(f, "{} {}", "Reference Date:".yellow(), self.reference_date)?;
+        writeln!(f, "{} {}", "Local Currency:".yellow(), self.local_currency)?;
+
+        writeln!(f, "{}", "Exchange Rates:".bold().green())?;
+        for ((ccy1, ccy2), rate) in &self.discounted_exchange_rate_map {
+            writeln!(f, "  {} {}-{}: {:.6}", "Rate:".cyan(), ccy1, ccy2, rate)?;
+        }
+
+        writeln!(f, "{}", "Curves:".bold().green())?;
+        let mut curve_ids: Vec<usize> = self.curves_map.keys().cloned().collect();
+        curve_ids.sort();
+        for id in curve_ids {
+            let curve = &self.curves_map[&id];
+            let name = curve
+                .name()
+                .map(|n| format!(" ({})", n))
+                .unwrap_or_default();
+            writeln!(
+                f,
+                "{} {}{}, {} {}",
+                "  Curve ID:".cyan(),
+                id,
+                name,
+                "Currency:".cyan(),
+                curve.currency()
+            )?;
+            curve
+                .dates()
+                .iter()
+                .zip(curve.discount_factors().iter())
+                .for_each(|(date, df)| {
+                    writeln!(
+                        f,
+                        "    {} {}, {} {:.6}, {} {:.8}",
+                        "Date:".magenta(),
+                        date,
+                        "Tenor:".magenta(),
+                        curve
+                            .day_counter()
+                            .year_fraction(curve.reference_date(), *date),
+                        "DF:".magenta(),
+                        df
+                    )
+                    .unwrap();
+                });
+        }
+        writeln!(
+            f,
+            "{}",
+            "=====================================".blue().bold()
+        )
     }
 }
 
@@ -588,7 +721,6 @@ impl YieldProvider for BootstrappingCurve {
                 )?;
                 return Ok(discount_factor.powf(year_fraction / *second_yf));
             }
-            
         }
 
         let discount_factor = self.interpolator.interpolate(
@@ -868,10 +1000,6 @@ impl<'a> Model for BootstrappingModel<'a> {
         let entry = cache.entry(fx.clone()).or_insert(computed);
         Ok(*entry)
     }
-
-    // fn gen_numerarie(&self, _: &MarketRequest) -> Result<f64> {
-    //     Ok(1.0)
-    // }
 }
 
 #[cfg(test)]

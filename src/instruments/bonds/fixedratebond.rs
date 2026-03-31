@@ -12,10 +12,7 @@ use crate::{
     currencies::enums::Currency,
     instruments::traits::Structure,
     rates::interestrate::InterestRate,
-    time::{
-        date::Date,
-        enums::Frequency,
-    },
+    time::{date::Date, enums::Frequency},
     utils::errors::Result,
     visitors::traits::HasCashflows,
 };
@@ -132,15 +129,14 @@ impl FixedRateBond {
         self.issue_date
     }
 
-    pub fn set_discount_curve_id(mut self, discount_curve_id: usize) -> Self {
+    pub fn set_discount_curve_id(&mut self, discount_curve_id: usize) {
         self.discount_curve_id = Some(discount_curve_id);
         self.mut_cashflows()
             .for_each(|cf| cf.set_discount_curve_id(discount_curve_id));
 
-        self
     }
 
-    pub fn set_rate(mut self, rate: InterestRate) -> Self {
+    pub fn set_rate(&mut self, rate: InterestRate) {
         self.rate = rate;
         self.mut_cashflows().for_each(|cf| match cf {
             Cashflow::FixedRateCoupon(coupon) => {
@@ -148,7 +144,10 @@ impl FixedRateBond {
             }
             _ => {}
         });
-        self
+    }
+
+    pub fn set_yield_rate(&mut self, yield_rate: InterestRate) {
+        self.yield_rate = Some(yield_rate);
     }
 }
 
@@ -247,15 +246,22 @@ impl Display for FixedRateBond {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cashflows::{cashflow::Cashflow, side::Side, traits::Payable}, core::traits::HasDiscountCurveId, currencies::enums::Currency, instruments::{
+        cashflows::{cashflow::Cashflow, side::Side, traits::Payable},
+        core::traits::HasDiscountCurveId,
+        currencies::enums::Currency,
+        instruments::{
             bonds::traits::InteresAccrualAtYieldRate,
             constructors::makefixedratebond::MakeFixedRateBond,
-        }, rates::{enums::Compounding, interestrate::InterestRate}, time::{
+        },
+        rates::{enums::Compounding, interestrate::InterestRate},
+        time::{
             date::Date,
             daycounter::DayCounter,
             enums::{Frequency, TimeUnit},
             period::Period,
-        }, utils::errors::Result, visitors::traits::HasCashflows
+        },
+        utils::errors::Result,
+        visitors::traits::HasCashflows,
     };
 
     #[test]
@@ -527,7 +533,7 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let instrument = MakeFixedRateBond::new()
+        let mut instrument = MakeFixedRateBond::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_payment_frequency(Frequency::Semiannual)
@@ -553,9 +559,9 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let new_instrument = instrument.set_rate(new_rate);
+        instrument.set_rate(new_rate);
 
-        new_instrument.cashflows().for_each(|cf| match cf {
+        instrument.cashflows().for_each(|cf| match cf {
             Cashflow::FixedRateCoupon(coupon) => {
                 assert!((coupon.amount().unwrap() - 75000.0).abs() < 1e-6);
                 assert_eq!(coupon.rate(), new_rate);
@@ -667,7 +673,7 @@ mod tests {
             DayCounter::Thirty360,
         );
 
-        let instrument = MakeFixedRateBond::new()
+        let mut instrument = MakeFixedRateBond::new()
             .with_start_date(start_date)
             .with_end_date(end_date)
             .with_payment_frequency(Frequency::Annual)
@@ -678,7 +684,7 @@ mod tests {
             .bullet()
             .build()?;
 
-        let instrument = instrument.set_discount_curve_id(42);
+        instrument.set_discount_curve_id(42);
 
         assert_eq!(instrument.discount_curve_id(), Some(42));
         instrument.cashflows().for_each(|cf| {
@@ -813,5 +819,4 @@ mod tests {
 
         Ok(())
     }
-
 }

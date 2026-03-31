@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use crate::{
@@ -31,6 +30,8 @@ pub trait AdvanceTermStructureInTime {
 pub trait YieldTermStructureTrait:
     YieldProvider + HasReferenceDate + AdvanceTermStructureInTime + Send + Sync
 {
-    /// Método para downcast seguro
-    fn as_any(&self) -> &dyn Any;
+    /// Returns the pillar dates of the term structure if available
+    fn pillar_dates(&self) -> Option<Vec<Date>> {
+        None
+    }
 }

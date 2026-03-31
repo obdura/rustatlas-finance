@@ -1,4 +1,4 @@
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 use crate::{
     rates::{
         enums::Compounding, interestrate::RateDefinition, traits::{HasReferenceDate, YieldProvider}
@@ -132,8 +132,8 @@ impl AdvanceTermStructureInTime for TenorBasedSpreadRateTermStructure {
 }
 
 impl YieldTermStructureTrait for TenorBasedSpreadRateTermStructure {
-    fn as_any(&self) -> &dyn Any {
-        self
+    fn pillar_dates(&self) -> Option<Vec<Date>> {
+        self.base_curve.pillar_dates()
     }
 }
 
