@@ -1,12 +1,6 @@
 RustAtlas
 =========
 
-[![CI](https://github.com/your-org/rustatlas/actions/workflows/rust.yml/badge.svg)](https://github.com/your-org/rustatlas/actions/workflows/rust.yml)
-[![Crates.io](https://img.shields.io/crates/v/rustatlas.svg)](https://crates.io/crates/rustatlas)
-[![docs.rs](https://docs.rs/rustatlas/badge.svg)](https://docs.rs/rustatlas)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.82.0-orange.svg)](https://www.rust-lang.org)
-
 **RustAtlas** is a high-performance quantitative finance library written in Rust (edition 2021, toolchain 1.82.0), designed for precision and speed in financial calculations. It is built around a visitor pattern for analytics, a `MarketStore` for market data, and a `SimpleModel` for resolving discount factors, forward rates, and FX rates.
 
 Architecture Overview
