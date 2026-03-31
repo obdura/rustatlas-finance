@@ -21,8 +21,11 @@ use rustatlas::{
 mod common;
 use crate::common::common::*;
 
+// Floating rate loan starting today.
+// The FixingVisitor resolves the index rates for each coupon before pricing.
+// Par spread: the spread over the index that makes NPV = 0.
 fn starting_today_pricing() {
-    print_title("Pricing of a Floating Rate Loan starting today");
+    print_title("Floating Rate Loan — starting today");
 
     let market_store = create_store().unwrap();
     let ref_date = market_store.reference_date();
@@ -31,8 +34,10 @@ fn starting_today_pricing() {
     let end_date = start_date + Period::new(5, TimeUnit::Years);
     let notional = 100_000.0;
 
+    // RateDefinition::default() uses Actual360 / Simple / Annual
     let rate_definition = RateDefinition::default();
 
+    // forecast_curve_id(1) provides the index fixings; discount_curve_id(2) discounts cashflows.
     let mut instrument = MakeFloatingRateInstrument::new()
         .with_start_date(start_date)
         .with_end_date(end_date)
@@ -50,22 +55,25 @@ fn starting_today_pricing() {
 
     let model = SimpleModel::new(&market_store);
 
+    // FixingVisitor must run before NPV to populate floating coupon rates
     let fixing_visitor = FixingVisitor::new(&model);
-    let _ = fixing_visitor.visit(&mut instrument);
+    fixing_visitor.visit(&mut instrument).unwrap();
 
     let npv_visitor = NPVConstVisitor::new(&model, true);
-    let npv = npv_visitor.visit(&instrument);
+    let npv = npv_visitor.visit(&instrument).unwrap();
 
     print_separator();
-    println!("NPV: {}", npv.unwrap());
+    println!("NPV: {:.4}", npv);
 
     let par_visitor = ParValueConstVisitor::new(&model);
-    let par_value = par_visitor.visit(&instrument).unwrap();
-    println!("Par Value: {}", par_value);
+    let par_spread = par_visitor.visit(&instrument).unwrap();
+    println!("Par Spread: {:.6}", par_spread);
 }
 
+// Already-started floating loan: began 3 months ago.
+// The first coupon is partially accrued; its fixing rate comes from historical data.
 fn already_started_pricing() {
-    print_title("Pricing of a Floating Rate Loan already started -1Y");
+    print_title("Floating Rate Loan — already started (-3M)");
 
     let market_store = create_store().unwrap();
     let ref_date = market_store.reference_date();
@@ -94,17 +102,17 @@ fn already_started_pricing() {
     let model = SimpleModel::new(&market_store);
 
     let fixing_visitor = FixingVisitor::new(&model);
-    let _ = fixing_visitor.visit(&mut instrument);
+    fixing_visitor.visit(&mut instrument).unwrap();
 
     let npv_visitor = NPVConstVisitor::new(&model, true);
-    let npv = npv_visitor.visit(&instrument);
+    let npv = npv_visitor.visit(&instrument).unwrap();
 
     print_separator();
-    println!("NPV: {}", npv.unwrap());
+    println!("NPV: {:.4}", npv);
 }
 
 fn main() {
     starting_today_pricing();
-    println!("\n");
+    println!();
     already_started_pricing();
 }
