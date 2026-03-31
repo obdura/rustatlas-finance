@@ -1,10 +1,35 @@
-RustAtlas
-=========
+# RustAtlas
 
-**RustAtlas** is a high-performance quantitative finance library written in Rust (edition 2021, toolchain 1.82.0), designed for precision and speed in financial calculations. It is built around a visitor pattern for analytics, a `MarketStore` for market data, and a `SimpleModel` for resolving discount factors, forward rates, and FX rates.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust Edition](https://img.shields.io/badge/Rust-2021-blueviolet.svg)](https://www.rust-lang.org/)
+[![Minimum Rust Version](https://img.shields.io/badge/MSRV-1.82.0-blue.svg)](https://www.rust-lang.org/)
+[![GitHub](https://img.shields.io/badge/GitHub-Poss9368/rustatlas--finance-black?logo=github)](https://github.com/Poss9368/rustatlas-finance)
 
-Architecture Overview
----------------------
+**RustAtlas** is a high-performance quantitative finance library written in Rust, designed for precision and speed in fixed-income pricing, FX derivatives, and ALM simulation. Built on a visitor pattern architecture with type-safe cashflows and pluggable market models.
+
+**Status**: Production-ready for fixed-income instruments and ALM simulation. Derivatives pricing actively maintained.
+
+### Key Highlights
+
+- 🚀 **Type-safe**: Leverages Rust's type system for instrument and cashflow safety
+- ⚡ **High-performance**: Parallel computation via Rayon, forward-mode AD for sensitivities
+- 🏗️ **Extensible**: Visitor pattern + trait-based design for custom analytics
+- 📊 **Comprehensive**: 20+ pricing visitors, multi-curve bootstrapping, ALM simulation
+- 🌍 **Multi-currency**: Automatic FX conversion, triangulation, date-window averaging
+- 🔒 **No panics**: All fallible operations return `Result<T>` via unified error type
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Examples](#examples)
+- [Features](#features)
+- [Installation](#installation)
+- [Contributing](#contributing)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+## Architecture
 
 ```
 MarketStore ──► SimpleModel ──► Visitors (NPV, Par, Duration, Z-spread, …)
@@ -17,17 +42,27 @@ MarketStore ──► SimpleModel ──► Visitors (NPV, Par, Duration, Z-spre
 - Visitors traverse cashflows without mutating instruments (`ConstVisit`) or with mutation (`Visit`).
 - The `prelude` module re-exports everything needed for day-to-day use.
 
-Quick Start
------------
+## Quick Start
 
-Add to `Cargo.toml`:
+### Installation
+
+Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rustatlas = { path = "." }
+rustatlas = "1.0"
 ```
 
-### Build a fixed-rate instrument
+Or for development (local path):
+
+```toml
+[dependencies]
+rustatlas = { path = "../path/to/rustatlas" }
+```
+
+**Documentation**: [docs.rs/rustatlas](https://docs.rs/rustatlas) | **Source**: [github.com/Poss9368/rustatlas-finance](https://github.com/Poss9368/rustatlas-finance)
+
+### Build a Fixed-Rate Instrument
 
 ```rust
 use rustatlas::prelude::*;
@@ -55,7 +90,7 @@ let instrument = MakeFixedRateInstrument::new()
 instrument.cashflows().for_each(|cf| println!("{}", cf));
 ```
 
-### Price with NPV visitor
+### Price with NPV Visitor
 
 Pricing is done through visitors. The `SimpleModel` resolves discount factors and index fixings from a `MarketStore`:
 
@@ -84,8 +119,7 @@ assert_ne!(npv, 0.0);
 
 For more examples, see the [examples](examples) folder.
 
-Examples
---------
+## Examples
 
 | Example | Description |
 |---------|-------------|
@@ -103,8 +137,7 @@ cargo run --example fxforward
 cargo run --example rolloversimulation
 ```
 
-Features
---------
+## Features
 
 ### Market Data & Curves
 
@@ -239,8 +272,33 @@ Features
 | Grace periods in loans | ✅ Feature + unit tests |
 | Automatic currency conversion | ✅ Feature + unit tests |
 
-Dependencies
-------------
+## Installation
+
+Requirements:
+- Rust 1.82.0 or later
+- Cargo (comes with Rust)
+
+Clone and build:
+
+```bash
+git clone https://github.com/Poss9368/rustatlas-finance.git
+cd rustatlas-finance
+cargo build --release
+```
+
+Run tests:
+
+```bash
+cargo test --all-features
+```
+
+Run examples:
+
+```bash
+cargo run --release --example fixedratepricing
+```
+
+## Dependencies
 
 | Crate | Purpose |
 |-------|---------|
@@ -252,12 +310,45 @@ Dependencies
 | `bumpalo` | Arena allocator (AD tape) |
 | `colored` | Terminal output formatting |
 
-Contributing
-------------
+## Contributing
 
-Contributions to RustAtlas are welcome! If you have suggestions for improvements or have identified issues, please open an issue or submit a pull request.
+Contributions are welcome! Please follow these guidelines:
 
-License
--------
+1. **Fork** the repository
+2. **Create a feature branch**: `git checkout -b feature/my-feature`
+3. **Commit** with clear messages: `git commit -m 'Add feature X'`
+4. **Run tests**: `cargo test --all-features`
+5. **Run formatter**: `cargo fmt`
+6. **Run linter**: `cargo clippy -- -D warnings`
+7. **Push** to your fork and open a **Pull Request**
 
-RustAtlas is released under the MIT License. Details can be found in the [LICENSE](LICENSE) file.
+For major changes, please open an issue first to discuss what you'd like to change.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
+
+## Roadmap
+
+### Near-term (v1.x)
+- [ ] Parametric yield curve models (Nelson-Siegel-Svensson, Vasicek)
+- [ ] Option pricing (Black-Scholes, Binomial)
+- [ ] Enhanced benchmarking suite
+- [ ] WebAssembly (WASM) build
+
+### Medium-term (v2.x)
+- [ ] Monte Carlo simulation engine
+- [ ] Local volatility & stochastic vol models
+- [ ] Multi-threaded curve bootstrapping
+- [ ] REST API service wrapper
+
+### Long-term
+- [ ] Compile-time automatic differentiation (tracking [rust-lang#124509](https://github.com/rust-lang/rust/issues/124509))
+- [ ] GPU-accelerated computations
+- [ ] Real-time data connectors (Bloomberg, Reuters)
+
+## License
+
+RustAtlas is released under the MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+**Questions?** Open an [issue](https://github.com/Poss9368/rustatlas-finance/issues) or check the [examples](examples/) folder for more guidance.
